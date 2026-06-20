@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react'
 import Image from 'next/image'
 import { createClient } from '@supabase/supabase-js'
+import { usePlaidLink } from 'react-plaid-link'
 
 const supabase = createClient(
   'https://iymwleromrtbsthtlptk.supabase.co',
@@ -23,6 +24,73 @@ interface Conversation {
   created_at: string
 }
 
+function PlaidLinkButton({ authToken, plaidLinked, onSuccess, onDisconnect }: { 
+  authToken: string
+  plaidLinked: boolean
+  onSuccess: (accessToken: string) => void
+  onDisconnect: () => void
+}) {
+  const [linkToken, setLinkToken] = useState('')
+
+  useEffect(() => {
+    const fetchToken = async () => {
+      if (plaidLinked) return // don't fetch if already linked
+      const res = await fetch(`${HF_URL}/plaid/create_link_token`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${authToken}` }
+      })
+      const data = await res.json()
+      setLinkToken(data.link_token || '')
+    }
+    if (authToken) fetchToken()
+  }, [authToken, plaidLinked])
+
+  const { open, ready } = usePlaidLink({
+    token: linkToken,
+    onSuccess: async (public_token) => {
+      const res = await fetch(`${HF_URL}/plaid/exchange_token`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken}`
+        },
+        body: JSON.stringify({ public_token })
+      })
+      const data = await res.json()
+      if (data.access_token) {
+        onSuccess(data.access_token)
+      }
+    }
+  })
+
+  if (plaidLinked) {
+    return (
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center gap-2">
+          <span className="text-sky-400 text-sm">✅ Bank Connected</span>
+        </div>
+        <button
+          onClick={onDisconnect}
+          className="text-slate-500 hover:text-red-400 text-xs transition text-left"
+        >
+          Disconnect bank
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <button
+      onClick={() => open()}
+      disabled={!ready}
+      className="text-slate-400 hover:text-white text-sm transition text-left disabled:opacity-40"
+    >
+      🏦 Link Bank Account
+    </button>
+  )
+}
+
+
 export default function Home() {
   const [authToken, setAuthToken] = useState('')
   const [userId, setUserId] = useState('')
@@ -41,6 +109,9 @@ export default function Home() {
   const [currentConvId, setCurrentConvId] = useState<string | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const [plaidToken, setPlaidToken] = useState('')
+  const [plaidLinked, setPlaidLinked] = useState(false)
+  const [plaidAccessToken, setPlaidAccessToken] = useState('')
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -197,7 +268,7 @@ export default function Home() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${authToken}`
         },
-        body: JSON.stringify({ message: text, access_token: '' })
+        body: JSON.stringify({ message: text, access_token: plaidAccessToken })
       })
 
       const reader = response.body!.getReader()
@@ -402,21 +473,35 @@ export default function Home() {
         )}
       </div>
 
-      {/* Sign Out */}
-      <div className="p-4 border-t border-slate-800 shrink-0">
-        <button
-          onClick={async () => {
-            await supabase.auth.signOut()
-            setIsLoggedIn(false)
-            setMessages([])
-            setAuthToken('')
-            setConversations([])
-          }}
-          className="text-slate-400 hover:text-white text-sm transition w-full text-left"
-        >
-          Sign Out
-        </button>
-      </div>
+{/* Bank + Sign Out */}
+<div className="p-4 border-t border-slate-800 shrink-0 flex flex-col gap-3">
+  <PlaidLinkButton
+  authToken={authToken}
+  plaidLinked={plaidLinked}
+  onSuccess={(accessToken) => {
+    setPlaidAccessToken(accessToken)
+    setPlaidLinked(true)
+  }}
+  onDisconnect={() => {
+    setPlaidLinked(false)
+    setPlaidAccessToken('')
+  }}
+/>
+  <button
+    onClick={async () => {
+      await supabase.auth.signOut()
+      setIsLoggedIn(false)
+      setMessages([])
+      setAuthToken('')
+      setConversations([])
+      setPlaidLinked(false)
+      setPlaidAccessToken('')
+    }}
+    className="text-slate-400 hover:text-white text-sm transition w-full text-left"
+  >
+    Sign Out
+  </button>
+  </div>
     </>
   )}
 
