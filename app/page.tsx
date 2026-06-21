@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react'
 import Image from 'next/image'
 import { createClient } from '@supabase/supabase-js'
 import { usePlaidLink } from 'react-plaid-link'
+import ReactMarkdown from 'react-markdown'
 
 const supabase = createClient(
   'https://iymwleromrtbsthtlptk.supabase.co',
@@ -249,6 +250,13 @@ export default function Home() {
     }
     setIsAuthLoading(false)
   }
+
+function cleanMarkdown(text: string): string {
+  // Merge standalone numbers with the next line
+  // Handles: "1.\n**text**" and "1.\n **text**" and "1. \n**text**"
+  return text
+    .replace(/(\d+)\.\s*\n+\s*/g, '$1. ')
+}
 
   const sendMessage = async () => {
     const text = input.trim()
@@ -605,13 +613,31 @@ export default function Home() {
             ? 'bg-sky-500 text-white rounded-br-sm'
             : 'bg-[#111827] text-slate-200 rounded-bl-sm'
         }`}>
-          {msg.text || (isResponding && i === messages.length - 1 ? (
-            <span className="flex gap-1">
-              <span className="animate-bounce">●</span>
-              <span className="animate-bounce" style={{animationDelay:'0.1s'}}>●</span>
-              <span className="animate-bounce" style={{animationDelay:'0.2s'}}>●</span>
-            </span>
-          ) : '')}
+          {msg.text ? (
+  msg.isUser ? msg.text : (
+    <ReactMarkdown
+  components={{
+    p: ({children}) => <p className="mb-3 last:mb-0">{children}</p>,
+    strong: ({children}) => <strong className="font-semibold text-sky-300">{children}</strong>,
+    ol: ({children}) => <ol className="list-decimal list-inside space-y-3 my-2">{children}</ol>,
+    ul: ({children}) => <ul className="list-disc list-inside space-y-3 my-2">{children}</ul>,
+    li: ({children}) => <li className="ml-2">{children}</li>,
+    h1: ({children}) => <h1 className="text-lg font-bold mb-2">{children}</h1>,
+    h2: ({children}) => <h2 className="text-base font-bold mb-2">{children}</h2>,
+    h3: ({children}) => <h3 className="text-sm font-bold mb-1">{children}</h3>,
+    code: ({children}) => <code className="bg-slate-800 px-1 py-0.5 rounded text-sky-300 text-xs">{children}</code>,
+  }}
+>
+  {cleanMarkdown(msg.text)}
+</ReactMarkdown>
+  )
+) : (isResponding && i === messages.length - 1 ? (
+  <span className="flex gap-1">
+    <span className="animate-bounce">●</span>
+    <span className="animate-bounce" style={{animationDelay:'0.1s'}}>●</span>
+    <span className="animate-bounce" style={{animationDelay:'0.2s'}}>●</span>
+  </span>
+) : '')}
         </div>
       </div>
     ))}
