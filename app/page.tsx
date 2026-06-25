@@ -110,7 +110,7 @@ export default function Home() {
   const [currentConvId, setCurrentConvId] = useState<string | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const [plaidToken, setPlaidToken] = useState('')
+  const [acceptedTerms, setAcceptedTerms] = useState(false)
   const [plaidLinked, setPlaidLinked] = useState(false)
   const [plaidAccessToken, setPlaidAccessToken] = useState('')
 
@@ -270,8 +270,6 @@ useEffect(() => {
 }
 
 function cleanMarkdown(text: string): string {
-  // Merge standalone numbers with the next line
-  // Handles: "1.\n**text**" and "1.\n **text**" and "1. \n**text**"
   return text
     .replace(/(\d+)\.\s*\n+\s*/g, '$1. ')
 }
@@ -312,7 +310,22 @@ function cleanMarkdown(text: string): string {
             if (data === '[DONE]') continue
             try {
               const json = JSON.parse(data)
+              if (json.reauth) {
+                setPlaidLinked(false)
+                setPlaidAccessToken('')
+                setMessages(prev => {
+                  const updated = [...prev]
+                  updated[updated.length - 1] = {
+                    text: 'Your bank connection has expired. Please reconnect your bank account in the sidebar to continue getting personalized advice.',
+                    isUser: false
+                  }
+                  return updated
+                })
+                setIsResponding(false)
+                return
+              }
               const chunk = json.chunk || ''
+              
               if (chunk) {
                 fullResponse += chunk
                 setMessages(prev => {
@@ -377,11 +390,26 @@ function cleanMarkdown(text: string): string {
     className="bg-[#111827] text-white placeholder-slate-500 px-4 py-3 rounded-xl border border-slate-700 focus:border-sky-400 outline-none"
   />
 
-  {authError && <p className="text-red-400 text-sm text-center">{authError}</p>}
+<label className="flex items-start gap-3 cursor-pointer">
+    <input
+      type="checkbox"
+      checked={acceptedTerms}
+      onChange={e => setAcceptedTerms(e.target.checked)}
+      className="mt-1 w-4 h-4 accent-sky-400"
+    />
+    <span className="text-slate-400 text-xs leading-relaxed">
+      I agree to the{' '}
+      <a href="/privacy" target="_blank" className="text-sky-400 underline hover:text-sky-300">Privacy Policy</a>
+      {' '}and{' '}
+      <a href="/terms" target="_blank" className="text-sky-400 underline hover:text-sky-300">Terms of Service</a>
+    </span>
+  </label>
+
+{authError && <p className="text-red-400 text-sm text-center">{authError}</p>}
 
   <button
     type="submit"
-    disabled={isAuthLoading}
+    disabled={isAuthLoading || !acceptedTerms}
     className="bg-sky-400 text-[#080E1A] py-3 rounded-xl font-bold hover:bg-sky-300 transition disabled:opacity-50"
   >
     {isAuthLoading ? 'Signing in...' : 'Sign In'}
@@ -396,6 +424,7 @@ function cleanMarkdown(text: string): string {
   <button
     type="button"
     onClick={handleGoogleLogin}
+    disabled={!acceptedTerms}
     className="flex items-center justify-center gap-3 bg-white text-gray-800 py-3 rounded-xl font-semibold hover:bg-gray-100 transition"
   >
     <svg width="18" height="18" viewBox="0 0 18 18">
@@ -410,7 +439,7 @@ function cleanMarkdown(text: string): string {
   <button
     type="button"
     onClick={handleSignUp}
-    disabled={isAuthLoading}
+    disabled={isAuthLoading || !acceptedTerms}
     className="border border-sky-400 text-sky-400 py-3 rounded-xl font-bold hover:bg-sky-400/10 transition disabled:opacity-50"
   >
     Create Account

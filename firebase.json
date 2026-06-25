@@ -1,14 +1,7 @@
 {
   "hosting": {
-    "public": "public",
-    "rewrites": [
-      {
-        "source": "**",
-        "run": {
-          "serviceId": "fiscal-web",
-          "region": "northamerica-northeast2"
-        }
-      }
-    ]
+    "public": "out",
+    "cleanUrls": true,
+    "trailingSlash": false
   }
 }
