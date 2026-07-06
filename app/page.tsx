@@ -46,45 +46,62 @@ function PlaidLinkButton({ authToken, plaidLinked, onSuccess, onDisconnect, trig
   onTriggered?: () => void
 }) {
   const [linkToken, setLinkToken] = useState('')
+  const linkTokenFetched = useRef(false)
 
   useEffect(() => {
+    if (linkTokenFetched.current || plaidLinked || !authToken) return
+    linkTokenFetched.current = true
+    
     const fetchToken = async () => {
-      if (plaidLinked) return
-      const res = await fetch(`${HF_URL}/plaid/create_link_token`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${authToken}` }
-      })
-      const data = await res.json()
-      setLinkToken(data.link_token || '')
+      try {
+        const res = await fetch(`${HF_URL}/plaid/create_link_token`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        })
+        const data = await res.json()
+        setLinkToken(data.link_token || '')
+      } catch (e) {
+        console.error('Link token error:', e)
+      }
     }
-    if (authToken) fetchToken()
+    fetchToken()
   }, [authToken, plaidLinked])
 
   const { open, ready } = usePlaidLink({
-    token: linkToken,
+    token: linkToken || null,
     onSuccess: async (public_token) => {
-      const res = await fetch(`${HF_URL}/plaid/exchange_token`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${authToken}`
-        },
-        body: JSON.stringify({ public_token })
-      })
-      const data = await res.json()
-      if (data.access_token) {
-        onSuccess(data.access_token)
+      try {
+        const res = await fetch(`${HF_URL}/plaid/exchange_token`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${authToken}`
+          },
+          body: JSON.stringify({ public_token })
+        })
+        const data = await res.json()
+        if (data.access_token) {
+          onSuccess(data.access_token)
+        }
+      } catch (e) {
+        console.error('Exchange token error:', e)
       }
     }
   })
 
-  // Auto-open when triggered from dashboard
   useEffect(() => {
     if (triggerOpen && ready && !plaidLinked) {
       open()
       onTriggered?.()
     }
   }, [triggerOpen, ready, plaidLinked])
+
+  // Reset on disconnect so a new token can be fetched
+  useEffect(() => {
+    if (!plaidLinked) {
+      linkTokenFetched.current = false
+    }
+  }, [plaidLinked])
 
   if (plaidLinked) {
     return (
@@ -240,7 +257,6 @@ export default function Home() {
   const [acceptedTerms, setAcceptedTerms] = useState(false)
   const [plaidLinked, setPlaidLinked] = useState(false)
   const [plaidAccessToken, setPlaidAccessToken] = useState('')
-  const [activeTab, setActiveTab] = useState<'chat' | 'dashboard'>('chat')
   const [chartData, setChartData] = useState<any>(null)
   const [chartLoading, setChartLoading] = useState(false)
   const inChartRef = useRef(false)
@@ -252,6 +268,10 @@ export default function Home() {
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin')
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
+  const [activeTab, setActiveTab] = useState<'chat' | 'dashboard' | 'calendar'>('chat')
+  const [calendarData, setCalendarData] = useState<any>(null)
+  const [calendarLoading, setCalendarLoading] = useState(false)
+  const [calendarMonth, setCalendarMonth] = useState(new Date())
 
 useEffect(() => {
   const init = async () => {
@@ -275,6 +295,55 @@ useEffect(() => {
   }
   init()
 }, [])
+
+useEffect(() => {
+  if (!plaidAccessToken || !authToken) return
+  
+  if (activeTab === 'calendar' && !calendarData) {
+    fetchCalendarData(plaidAccessToken)
+  }
+
+  if (activeTab === 'dashboard' && !chartData) {
+    loadChartData()
+  }
+}, [plaidAccessToken, activeTab, authToken])
+
+const fetchCalendarData = async (accessToken: string, token?: string) => {
+  const auth = token || authToken
+  setCalendarLoading(true)
+  
+  // Retry only for PRODUCT_NOT_READY
+  for (let i = 0; i < 6; i++) {
+    try {
+      const res = await fetch(`${HF_URL}/plaid/recurring`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${auth}`
+        },
+        body: JSON.stringify({ message: '', access_token: accessToken })
+      })
+      const data = await res.json()
+      
+      if (data.not_ready) {
+        console.log(`Plaid not ready, retry ${i + 1}/6...`)
+        await new Promise(resolve => setTimeout(resolve, 10000))
+        continue
+      }
+      
+      // Got data — show it, done
+      setCalendarData(data)
+      setCalendarLoading(false)
+      return
+      
+    } catch (e) {
+      console.error('Calendar fetch error:', e)
+      await new Promise(resolve => setTimeout(resolve, 5000))
+    }
+  }
+  
+  setCalendarLoading(false)
+}
 
   const loadConversations = async (uid: string) => {
     const { data } = await supabase
@@ -601,7 +670,7 @@ const extractChartData = (text: string): { cleanText: string; chart: any | null 
         ].map((p, i) => (
           <div
             key={i}
-            className="absolute w-1 h-1 bg-sky-400/20 rounded-full"
+            className="absolute w-1 h-1 bg-sky-400/100 rounded-full"
             style={{
               left: `${p.l}%`,
               top: `${p.t}%`,
@@ -620,10 +689,10 @@ const extractChartData = (text: string): { cleanText: string; chart: any | null 
             <div className="relative flex items-center justify-center w-24 h-24 mb-4">
               <div className="absolute inset-0 rounded-full bg-sky-400/10 animate-ping" style={{ animationDuration: '2s' }} />
               <div className="absolute inset-2 rounded-full bg-sky-400/15 animate-pulse" style={{ animationDuration: '1.6s' }} />
-              <Image src="/fiscallogo_nobg.png" alt="FISCAL" width={80} height={80} className="relative z-10" />
+              <Image src="/fiscallogo_nobg.png" alt="FISCAL" width={80} height={80} className="relative z-10" priority />
             </div>
             <h1 className="text-white text-2xl font-bold">FISCAL</h1>
-            <p className="text-slate-400 text-sm mt-1">Your AI Financial Assistant</p>
+            <p className="text-slate-400 text-sm mt-1">Your AI Budgeting Assistant</p>
           </div>
 
           {/* Auth Card */}
@@ -758,15 +827,46 @@ const extractChartData = (text: string): { cleanText: string; chart: any | null 
 
   {!sidebarCollapsed && (
     <>
-      {/* New Conversation */}
-      <div className="p-3 shrink-0">
-        <button
-          onClick={newConversation}
-          className="w-full bg-sky-400 text-[#080E1A] py-2 rounded-xl font-semibold text-sm hover:bg-sky-300 transition"
-        >
-          + New Conversation
-        </button>
-      </div>
+{/* New Conversation */}
+<div className="p-3 shrink-0">
+  <button
+    onClick={newConversation}
+    className="w-full bg-sky-400 text-[#080E1A] py-2 rounded-xl font-semibold text-sm hover:bg-sky-300 transition"
+  >
+    + New Conversation
+  </button>
+  <button
+    onClick={async () => {
+      setActiveTab('calendar')
+      setSidebarOpen(false)
+      if (plaidAccessToken && !calendarData) {
+        setCalendarLoading(true)
+        try {
+          const res = await fetch(`${HF_URL}/plaid/recurring`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${authToken}`
+            },
+            body: JSON.stringify({ message: '', access_token: plaidAccessToken })
+          })
+          const data = await res.json()
+          setCalendarData(data)
+        } catch (e) {
+          console.error('Calendar data error:', e)
+        }
+        setCalendarLoading(false)
+      }
+    }}
+    className={`w-full mt-2 py-2 rounded-xl font-semibold text-sm transition flex items-center justify-center gap-2 ${
+      activeTab === 'calendar'
+        ? 'bg-sky-400/10 text-sky-400 border border-sky-400/20'
+        : 'text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-700'
+    }`}
+  >
+    📅 Calendar
+  </button>
+</div>
 
       {/* Search */}
       <div className="px-3 pb-3 shrink-0">
@@ -821,13 +921,41 @@ const extractChartData = (text: string): { cleanText: string; chart: any | null 
   plaidLinked={plaidLinked}
   triggerOpen={triggerPlaidLink}
   onTriggered={() => setTriggerPlaidLink(false)}
-  onSuccess={(accessToken) => {
-    setPlaidAccessToken(accessToken)
-    setPlaidLinked(true)
-  }}
+
+  onSuccess={async (accessToken) => {
+  setPlaidAccessToken(accessToken)
+  setPlaidLinked(true)
+  setCalendarData(null)  // Force refetch
+  setChartData(null)
+  // Wait for Plaid to sync transactions
+  if (activeTab === 'calendar') {
+    setCalendarLoading(true)
+    fetchCalendarData(accessToken)
+
+    // Delay 3 seconds to let Plaid sync
+    await new Promise(resolve => setTimeout(resolve, 3000))
+    try {
+      const res = await fetch(`${HF_URL}/plaid/recurring`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken}`
+        },
+        body: JSON.stringify({ message: '', access_token: accessToken })
+      })
+      const data = await res.json()
+      setCalendarData(data)
+    } catch (e) {
+      console.error('Calendar fetch error:', e)
+    }
+    setCalendarLoading(false)
+  }
+}}
   onDisconnect={() => {
     setPlaidLinked(false)
     setPlaidAccessToken('')
+    setCalendarData(null)
+    setChartData(null)
   }}
 />
   <button
@@ -914,7 +1042,213 @@ const extractChartData = (text: string): { cleanText: string; chart: any | null 
       </button>
         </div>
 
-   {activeTab === 'chat' ? (
+  {activeTab === 'calendar' ? (
+  /* Calendar view — paste the entire calendar JSX here */
+  <div className="flex-1 overflow-y-auto px-4 py-6 max-w-4xl mx-auto w-full min-h-0">
+    {calendarLoading ? (
+  <div className="flex flex-col items-center justify-center h-64 gap-3">
+    <div className="w-8 h-8 border-[3px] border-sky-400 border-t-transparent rounded-full animate-spin" />
+    <div className="text-sky-400 text-sm">Analyzing your transactions...</div>
+    <p className="text-slate-500 text-xs">This can take a minute after connecting your bank</p>
+  </div>
+) : !calendarData ? (
+      <div className="flex flex-col items-center justify-center h-64 gap-4">
+        <span className="text-4xl">📅</span>
+        <p className="text-slate-400 text-sm">Connect your bank to see your financial calendar</p>
+        <button onClick={() => setTriggerPlaidLink(true)} className="bg-sky-400 text-[#080E1A] px-6 py-3 rounded-xl font-semibold hover:bg-sky-300 transition">
+          🔗 Connect Your Bank
+        </button>
+      </div>
+    ) : (
+      <div className="space-y-6">
+        {calendarData && (
+          <div className="bg-[#0D1B2E] rounded-xl p-3 border border-slate-800 flex items-center justify-between mb-4">
+            <p className="text-slate-400 text-xs">
+              Found {calendarData.recurring_expenses?.length || 0} recurring expenses and {calendarData.recurring_income?.length || 0} income sources
+            </p>
+            <button
+              onClick={() => {
+                setCalendarData(null)
+                fetchCalendarData(plaidAccessToken)
+              }}
+              className="text-sky-400 hover:text-sky-300 text-xs transition"
+            >
+              ↻ Refresh
+            </button>
+          </div>
+        )}
+        {/* Month Navigation */}
+        <div className="flex items-center justify-between">
+          <button
+            onClick={() => setCalendarMonth(prev => new Date(prev.getFullYear(), prev.getMonth() - 1))}
+            className="text-slate-400 hover:text-white transition px-3 py-1"
+          >
+            ← Prev
+          </button>
+          <h2 className="text-white font-bold text-lg">
+            {calendarMonth.toLocaleDateString('en-CA', { month: 'long', year: 'numeric' })}
+          </h2>
+          <button
+            onClick={() => setCalendarMonth(prev => new Date(prev.getFullYear(), prev.getMonth() + 1))}
+            className="text-slate-400 hover:text-white transition px-3 py-1"
+          >
+            Next →
+          </button>
+        </div>
+
+        {/* Calendar Grid */}
+        <div className="bg-[#111827] rounded-2xl border border-slate-800 overflow-hidden">
+          {/* Day headers */}
+          <div className="grid grid-cols-7 border-b border-slate-800">
+            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
+              <div key={d} className="text-center text-slate-500 text-xs py-2 font-semibold">{d}</div>
+            ))}
+          </div>
+
+          {/* Calendar days */}
+          <div className="grid grid-cols-7">
+            {(() => {
+              const year = calendarMonth.getFullYear()
+              const month = calendarMonth.getMonth()
+              const firstDay = new Date(year, month, 1).getDay()
+              const daysInMonth = new Date(year, month + 1, 0).getDate()
+              const today = new Date()
+              const cells = []
+
+              // Empty cells before first day
+              for (let i = 0; i < firstDay; i++) {
+                cells.push(<div key={`empty-${i}`} className="min-h-[80px] border-b border-r border-slate-800/50" />)
+              }
+
+              // Day cells
+              for (let day = 1; day <= daysInMonth; day++) {
+                const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+                const isToday = today.getFullYear() === year && today.getMonth() === month && today.getDate() === day
+                const events = calendarData.projected_events?.filter((e: any) => e.date === dateStr) || []
+
+                cells.push(
+                  <div key={day} className={`min-h-[80px] border-b border-r border-slate-800/50 p-1 ${isToday ? 'bg-sky-400/5' : ''}`}>
+                    <span className={`text-xs font-semibold block mb-1 ${isToday ? 'text-sky-400' : 'text-slate-400'}`}>
+                      {day}
+                    </span>
+                    {events.map((event: any, idx: number) => (
+                      <div
+                        key={idx}
+                        className={`text-[9px] px-1.5 py-0.5 rounded mb-0.5 truncate ${
+                          event.is_income
+                            ? 'bg-emerald-400/10 text-emerald-400 border border-emerald-400/20'
+                            : 'bg-red-400/10 text-red-400 border border-red-400/20'
+                        }`}
+                        title={`${event.merchant} - $${event.amount} (${event.frequency})`}
+                      >
+                        {event.is_income ? '+' : '-'}${event.amount} {event.merchant.slice(0, 12)}
+                      </div>
+                    ))}
+                  </div>
+                )
+              }
+
+              return cells
+            })()}
+          </div>
+        </div>
+
+        {/* Recurring Summary */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Income */}
+          <div className="bg-[#111827] rounded-2xl p-4 border border-slate-800">
+            <h3 className="text-emerald-400 font-bold text-sm mb-3">💰 Recurring Income</h3>
+            {calendarData.recurring_income?.length === 0 ? (
+              <p className="text-slate-500 text-xs">No recurring income detected yet</p>
+            ) : (
+              <div className="space-y-2">
+                {calendarData.recurring_income?.map((item: any, i: number) => (
+                  <div key={i} className="flex items-center justify-between bg-[#0D1B2E] rounded-xl p-3 border border-slate-700">
+                    <div>
+                      <p className="text-white text-xs font-semibold">{item.merchant}</p>
+                      <p className="text-slate-500 text-[10px]">{item.frequency} • {item.consecutive_months} months</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-emerald-400 text-sm font-bold">+${item.amount.toFixed(2)}</p>
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded ${
+                        item.status === 'confirmed' ? 'bg-emerald-400/10 text-emerald-400' : 'bg-yellow-400/10 text-yellow-400'
+                      }`}>
+                        {item.status}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Expenses */}
+          <div className="bg-[#111827] rounded-2xl p-4 border border-slate-800">
+            <h3 className="text-red-400 font-bold text-sm mb-3">💸 Recurring Expenses</h3>
+            {calendarData.recurring_expenses?.length === 0 ? (
+              <p className="text-slate-500 text-xs">No recurring expenses detected yet</p>
+            ) : (
+              <div className="space-y-2">
+                {calendarData.recurring_expenses?.map((item: any, i: number) => (
+                  <div key={i} className="flex items-center justify-between bg-[#0D1B2E] rounded-xl p-3 border border-slate-700">
+                    <div>
+                      <p className="text-white text-xs font-semibold">{item.merchant}</p>
+                      <p className="text-slate-500 text-[10px]">{item.frequency} • {item.consecutive_months} months</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-red-400 text-sm font-bold">-${item.amount.toFixed(2)}</p>
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded ${
+                        item.status === 'confirmed' ? 'bg-emerald-400/10 text-emerald-400' : 'bg-yellow-400/10 text-yellow-400'
+                      }`}>
+                        {item.status}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Export to Google Calendar */}
+        <div className="flex justify-center gap-4 pb-4">
+          <button
+            onClick={async () => {
+              try {
+                const res = await fetch(`${HF_URL}/plaid/calendar_export`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${authToken}`
+                  },
+                  body: JSON.stringify({ message: '', access_token: plaidAccessToken })
+                })
+                const blob = await res.blob()
+                const url = URL.createObjectURL(blob)
+                const a = document.createElement('a')
+                a.href = url
+                a.download = 'fiscal-calendar.ics'
+                a.click()
+                URL.revokeObjectURL(url)
+              } catch (e) {
+                console.error('Calendar export error:', e)
+              }
+            }}
+            className="bg-sky-400 text-[#080E1A] px-6 py-3 rounded-xl font-semibold hover:bg-sky-300 transition flex items-center gap-2"
+          >
+            📥 Export to Calendar (.ics)
+          </button>
+          <button
+            onClick={() => fetchCalendarData(plaidAccessToken)}
+            className="text-sky-400 hover:text-sky-300 text-sm transition px-4 py-3"
+          >
+            ↻ Refresh
+          </button>
+        </div>
+      </div>
+    )}
+  </div>
+) : activeTab === 'chat' ? (
   <>
     {/* Messages */}
     <div className="flex-1 overflow-y-auto px-4 py-6 max-w-5xl mx-auto w-full min-h-0">
