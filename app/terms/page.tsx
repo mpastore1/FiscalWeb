@@ -8,7 +8,7 @@ export default function Terms() {
   return (
     <div className="min-h-screen bg-[#080E1A] text-slate-300">
       <div className="max-w-3xl mx-auto px-6 py-12">
-        <Link href="/" className="text-sky-400 hover:text-sky-300 text-sm mb-8 inline-block">← Back to FISCAL</Link>
+        <Link href="/" className="text-sky-400 hover:text-sky-300 text-sm mb-8 inline-block">← Back to Cheque up</Link>
         <ReactMarkdown
           components={{
             h1: ({children}) => <h1 className="text-3xl font-bold text-white mb-6">{children}</h1>,

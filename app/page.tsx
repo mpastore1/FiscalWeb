@@ -5,6 +5,7 @@ import Image from 'next/image'
 import { createClient } from '@supabase/supabase-js'
 import { usePlaidLink } from 'react-plaid-link'
 import ReactMarkdown from 'react-markdown'
+import { motion } from 'framer-motion';
 import dynamic from 'next/dynamic';
 import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
@@ -20,8 +21,8 @@ const supabase = createClient(
   'sb_publishable_AZafK1NNF2CmXg4cTmTxhg_-sxIpa-d'
 )
 
-const HF_URL ='https://mj-prod-fiscal.hf.space' //'http://localhost:8000'
-//const HF_URL ='http://localhost:8000'
+//const HF_URL ='https://mj-prod-fiscal.hf.space' //'http://localhost:8000'
+const HF_URL ='http://localhost:8000'
 
 
 interface Message {
@@ -37,27 +38,35 @@ interface Conversation {
   created_at: string
 }
 
-function PlaidLinkButton({ authToken, plaidLinked, onSuccess, onDisconnect, triggerOpen, onTriggered }: { 
+function PlaidLinkButton({ authToken, plaidLinked, onSuccess, onDisconnect, triggerOpen, onTriggered, isTrialMode }: { 
   authToken: string
   plaidLinked: boolean
   onSuccess: (accessToken: string) => void
   onDisconnect: () => void
   triggerOpen?: boolean
   onTriggered?: () => void
+  isTrialMode?: boolean
 }) {
   const [linkToken, setLinkToken] = useState('')
   const linkTokenFetched = useRef(false)
 
   useEffect(() => {
-    if (linkTokenFetched.current || plaidLinked || !authToken) return
+    if (linkTokenFetched.current || plaidLinked) return
+    if (!authToken && !isTrialMode) return
     linkTokenFetched.current = true
     
     const fetchToken = async () => {
       try {
-        const res = await fetch(`${HF_URL}/plaid/create_link_token`, {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${authToken}` }
-        })
+        const url = isTrialMode 
+          ? `${HF_URL}/trial/plaid/create_link_token`
+          : `${HF_URL}/plaid/create_link_token`
+        
+        const headers: Record<string, string> = {}
+        if (!isTrialMode) {
+          headers['Authorization'] = `Bearer ${authToken}`
+        }
+        
+        const res = await fetch(url, { method: 'POST', headers })
         const data = await res.json()
         setLinkToken(data.link_token || '')
       } catch (e) {
@@ -65,18 +74,29 @@ function PlaidLinkButton({ authToken, plaidLinked, onSuccess, onDisconnect, trig
       }
     }
     fetchToken()
-  }, [authToken, plaidLinked])
+  }, [authToken, plaidLinked, isTrialMode])
 
+
+
+  
   const { open, ready } = usePlaidLink({
     token: linkToken || null,
     onSuccess: async (public_token) => {
       try {
-        const res = await fetch(`${HF_URL}/plaid/exchange_token`, {
+        const url = isTrialMode
+          ? `${HF_URL}/trial/plaid/exchange_token`
+          : `${HF_URL}/plaid/exchange_token`
+        
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json'
+        }
+        if (!isTrialMode) {
+          headers['Authorization'] = `Bearer ${authToken}`
+        }
+        
+        const res = await fetch(url, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${authToken}`
-          },
+          headers,
           body: JSON.stringify({ public_token })
         })
         const data = await res.json()
@@ -96,7 +116,6 @@ function PlaidLinkButton({ authToken, plaidLinked, onSuccess, onDisconnect, trig
     }
   }, [triggerOpen, ready, plaidLinked])
 
-  // Reset on disconnect so a new token can be fetched
   useEffect(() => {
     if (!plaidLinked) {
       linkTokenFetched.current = false
@@ -107,7 +126,7 @@ function PlaidLinkButton({ authToken, plaidLinked, onSuccess, onDisconnect, trig
     return (
       <div className="flex flex-col gap-2">
         <div className="flex items-center gap-2">
-          <span className="text-sky-400 text-sm">✅ Bank Connected</span>
+          <span className="text-teal-600 text-sm">✅ Bank Connected</span>
         </div>
         <button
           onClick={onDisconnect}
@@ -123,16 +142,15 @@ function PlaidLinkButton({ authToken, plaidLinked, onSuccess, onDisconnect, trig
     <button
       onClick={() => open()}
       disabled={!ready}
-      className="text-slate-400 hover:text-white text-sm transition text-left disabled:opacity-40"
+      className="text-slate-400 hover:text-slate-900 text-sm transition text-left disabled:opacity-40"
     >
       🏦 Link Bank Account
     </button>
   )
 }
 
-
 function InlineChart({ chart }: { chart: any }) {
-  const COLORS = ['#38bdf8', '#f472b6', '#a78bfa', '#34d399', '#fbbf24', '#f87171', '#818cf8', '#2dd4bf', '#fb923c', '#e879f9']
+  const COLORS = ['#0d9488', '#facc15', '#f472b6', '#34d399', '#f87171', '#818cf8', '#2dd4bf', '#fb923c', '#e879f9', '#a78bfa']
 
   // Detect data keys for multi-series charts
   const getSeriesKeys = (data: any[]) => {
@@ -151,8 +169,8 @@ function InlineChart({ chart }: { chart: any }) {
 
   return (
     <div className="mt-4 ml-10 animate-fadeIn">
-      <div className="bg-[#111827] rounded-2xl p-4 border border-slate-800">
-        <h3 className="text-white font-bold text-sm mb-1">{chart.title}</h3>
+      <div className="bg-white rounded-2xl p-4 border border-slate-200">
+        <h3 className="text-slate-900 font-bold text-sm mb-1">{chart.title}</h3>
         {chart.subtitle && <p className="text-slate-500 text-[10px] mb-4">{chart.subtitle}</p>}
 
         {chart.type === 'pie' && (
@@ -177,7 +195,7 @@ function InlineChart({ chart }: { chart: any }) {
         <div key={item.name} className="flex items-start gap-2">
           <div className="w-2.5 h-2.5 rounded-full shrink-0 mt-1" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
           <div>
-            <span className="text-white text-xs font-semibold">{item.name}</span>
+            <span className="text-slate-900 text-xs font-semibold">{item.name}</span>
             {item.detail && <p className="text-slate-500 text-[10px]">{item.detail}</p>}
           </div>
         </div>
@@ -237,6 +255,8 @@ function InlineChart({ chart }: { chart: any }) {
 }
 
 export default function Home() {
+  const [historyPopoverOpen, setHistoryPopoverOpen] = useState(false)
+  const [accountPopoverOpen, setAccountPopoverOpen] = useState(false)
   const [authToken, setAuthToken] = useState('')
   const [userId, setUserId] = useState('')
   const [isLoggedIn, setIsLoggedIn] = useState(false)
@@ -245,14 +265,12 @@ export default function Home() {
   const [authError, setAuthError] = useState('')
   const [isAuthLoading, setIsAuthLoading] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [hasStarted, setHasStarted] = useState(false)
   const [isResponding, setIsResponding] = useState(false)
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [currentConvId, setCurrentConvId] = useState<string | null>(null)
-  const [sidebarOpen, setSidebarOpen] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const [acceptedTerms, setAcceptedTerms] = useState(false)
   const [plaidLinked, setPlaidLinked] = useState(false)
@@ -260,6 +278,7 @@ export default function Home() {
   const [chartData, setChartData] = useState<any>(null)
   const [chartLoading, setChartLoading] = useState(false)
   const inChartRef = useRef(false)
+  const [firstNameDisplay, setFirstNameDisplay] = useState('')
   const [inlineChartLoading, setInlineChartLoading] = useState(false)
   const [canadianBanks, setCanadianBanks] = useState<any[]>([])
   const [triggerPlaidLink, setTriggerPlaidLink] = useState(false)
@@ -272,12 +291,22 @@ export default function Home() {
   const [calendarData, setCalendarData] = useState<any>(null)
   const [calendarLoading, setCalendarLoading] = useState(false)
   const [calendarMonth, setCalendarMonth] = useState(new Date())
+  const [isTrialMode, setIsTrialMode] = useState(false)
+  const [trialPromptsUsed, setTrialPromptsUsed] = useState(0)
+  const [trialPopup, setTrialPopup] = useState(false)
+  const TRIAL_LIMIT = 10
 
 useEffect(() => {
   const init = async () => {
     supabase.auth.onAuthStateChange(async (event, session) => {
       if (session) {
         setAuthToken(session.access_token)
+        const meta = session.user.user_metadata
+        const name = meta?.first_name 
+          || meta?.full_name?.split(' ')[0] 
+          || meta?.name?.split(' ')[0] 
+          || ''
+        setFirstNameDisplay(name)  // ← add this
         setUserId(session.user.id)
         setIsLoggedIn(true)
         await loadConversations(session.user.id)
@@ -290,6 +319,12 @@ useEffect(() => {
       setAuthToken(data.session.access_token)
       setUserId(data.session.user.id)
       setIsLoggedIn(true)
+      const meta = data.session.user.user_metadata
+      const name = meta?.first_name 
+        || meta?.full_name?.split(' ')[0] 
+        || meta?.name?.split(' ')[0] 
+        || ''
+      setFirstNameDisplay(name)
       await loadConversations(data.session.user.id)
     }
   }
@@ -312,15 +347,22 @@ const fetchCalendarData = async (accessToken: string, token?: string) => {
   const auth = token || authToken
   setCalendarLoading(true)
   
-  // Retry only for PRODUCT_NOT_READY
   for (let i = 0; i < 6; i++) {
     try {
-      const res = await fetch(`${HF_URL}/plaid/recurring`, {
+      const url = isTrialMode
+        ? `${HF_URL}/trial/plaid/recurring`
+        : `${HF_URL}/plaid/recurring`
+      
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json'
+      }
+      if (!isTrialMode) {
+        headers['Authorization'] = `Bearer ${auth}`
+      }
+
+      const res = await fetch(url, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${auth}`
-        },
+        headers,
         body: JSON.stringify({ message: '', access_token: accessToken })
       })
       const data = await res.json()
@@ -331,7 +373,6 @@ const fetchCalendarData = async (accessToken: string, token?: string) => {
         continue
       }
       
-      // Got data — show it, done
       setCalendarData(data)
       setCalendarLoading(false)
       return
@@ -384,7 +425,6 @@ const fetchCalendarData = async (accessToken: string, token?: string) => {
     setMessages(conv.messages)
     setCurrentConvId(conv.id)    
     setHasStarted(conv.messages.length > 0)
-    setSidebarOpen(false)
 
      await fetch(`${HF_URL}/load_history`, {
     method: 'POST',
@@ -396,15 +436,19 @@ const fetchCalendarData = async (accessToken: string, token?: string) => {
   })
   }
 
-  const newConversation = async () => {
+const newConversation = async () => {
     setMessages([])
     setCurrentConvId(null)
     setHasStarted(false)
-    setSidebarOpen(false)
-    await fetch(`${HF_URL}/reset`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${authToken}` }
-    })
+    
+    if (isTrialMode) {
+      await fetch(`${HF_URL}/trial/reset`, { method: 'POST' })
+    } else {
+      await fetch(`${HF_URL}/reset`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${authToken}` }
+      })
+    }
   }
 
   const deleteConversation = async (id: string, e: React.MouseEvent) => {
@@ -489,23 +533,26 @@ function cleanMarkdown(text: string): string {
 }
 
 const loadChartData = async () => {
-  console.log('loadChartData called, plaidAccessToken:', plaidAccessToken)
-  if (!plaidAccessToken) {
-    console.log('No plaid access token, skipping')
-    return
-  }
+  if (!plaidAccessToken) return
   setChartLoading(true)
   try {
-    const res = await fetch(`${HF_URL}/plaid/chart_data`, {
+    const url = isTrialMode
+      ? `${HF_URL}/trial/plaid/chart_data`
+      : `${HF_URL}/plaid/chart_data`
+    
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json'
+    }
+    if (!isTrialMode) {
+      headers['Authorization'] = `Bearer ${authToken}`
+    }
+
+    const res = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${authToken}`
-      },
+      headers,
       body: JSON.stringify({ message: '', access_token: plaidAccessToken })
     })
     const data = await res.json()
-    console.log('Chart data received:', data)
     setChartData(data)
   } catch (e) {
     console.error('Chart data error:', e)
@@ -516,6 +563,24 @@ const loadChartData = async () => {
   const sendMessage = async () => {
     const text = input.trim()
     if (!text || isResponding) return
+
+    if (isTrialMode) {
+      if (trialPromptsUsed >= TRIAL_LIMIT) {
+        setMessages(prev => [...prev, {
+          text: `You've used all ${TRIAL_LIMIT} free prompts. Create a free account to continue using Cheque up with unlimited conversations.`,
+          isUser: false
+        }])
+        return
+      }
+      
+      const newCount = trialPromptsUsed + 1
+      setTrialPromptsUsed(newCount)
+      localStorage.setItem('fiscal_trial', JSON.stringify({
+        ...JSON.parse(localStorage.getItem('fiscal_trial') || '{}'),
+        promptsUsed: newCount
+      }))
+    }
+
     setHasStarted(true)
     inChartRef.current = false
     setInput('')
@@ -527,13 +592,21 @@ const loadChartData = async () => {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
     }, 100)
 
+  const endpoint = isTrialMode 
+        ? `${HF_URL}/trial/chat/stream` 
+        : `${HF_URL}/chat/stream`
+      
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json'
+      }
+      if (!isTrialMode) {
+        headers['Authorization'] = `Bearer ${authToken}`
+      }
+
     try {
-      const response = await fetch(`${HF_URL}/chat/stream`, {
+      const response = await fetch(endpoint, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${authToken}`
-        },
+        headers: headers,
         body: JSON.stringify({ message: text, access_token: plaidAccessToken })
       })
 
@@ -628,6 +701,8 @@ const loadChartData = async () => {
     setIsResponding(false)
   }
 
+
+  
 const extractChartData = (text: string): { cleanText: string; chart: any | null } => {
   const chartMatch = text.match(/\[CHART_DATA\]\s*([\s\S]*?)\s*\[\/CHART_DATA\]/)
   if (chartMatch) {
@@ -643,15 +718,15 @@ const extractChartData = (text: string): { cleanText: string; chart: any | null 
 }
 
   // Login Screen
- if (!isLoggedIn) {
+ if (!isLoggedIn && !isTrialMode) {
   return (
-    <div className="min-h-screen bg-[#080E1A] relative overflow-hidden flex">
+    <div className="min-h-screen bg-slate-50 relative overflow-hidden flex">
       
       {/* Animated background */}
       <div className="absolute inset-0 overflow-hidden">
         <div className="absolute w-[500px] h-[500px] rounded-full bg-sky-500/5 blur-3xl -top-48 -left-24 animate-pulse" style={{ animationDuration: '8s' }} />
         <div className="absolute w-[400px] h-[400px] rounded-full bg-indigo-500/5 blur-3xl top-1/2 -right-32 animate-pulse" style={{ animationDuration: '12s' }} />
-        <div className="absolute w-[300px] h-[300px] rounded-full bg-sky-400/5 blur-3xl bottom-0 left-1/3 animate-pulse" style={{ animationDuration: '10s' }} />
+        <div className="absolute w-[300px] h-[300px] rounded-full bg-teal-600/5 blur-3xl bottom-0 left-1/3 animate-pulse" style={{ animationDuration: '10s' }} />
         <div className="absolute inset-0 opacity-[0.03]" style={{
           backgroundImage: 'linear-gradient(rgba(56,189,248,0.3) 1px, transparent 1px), linear-gradient(90deg, rgba(56,189,248,0.3) 1px, transparent 1px)',
           backgroundSize: '60px 60px'
@@ -670,7 +745,7 @@ const extractChartData = (text: string): { cleanText: string; chart: any | null 
         ].map((p, i) => (
           <div
             key={i}
-            className="absolute w-1 h-1 bg-sky-400/100 rounded-full"
+            className="absolute w-1 h-1 bg-teal-600/100 rounded-full"
             style={{
               left: `${p.l}%`,
               top: `${p.t}%`,
@@ -682,387 +757,242 @@ const extractChartData = (text: string): { cleanText: string; chart: any | null 
       </div>
 
       {/* Left side — Auth */}
-      <div className="flex-1 flex items-center justify-center px-6 relative z-10">
-        <div className="w-full max-w-sm">
-          {/* Logo */}
-          <div className="flex flex-col items-center mb-8">
-            <div className="relative flex items-center justify-center w-24 h-24 mb-4">
-              <div className="absolute inset-0 rounded-full bg-sky-400/10 animate-ping" style={{ animationDuration: '2s' }} />
-              <div className="absolute inset-2 rounded-full bg-sky-400/15 animate-pulse" style={{ animationDuration: '1.6s' }} />
-              <Image src="/fiscallogo_nobg.png" alt="FISCAL" width={80} height={80} className="relative z-10" priority />
-            </div>
-            <h1 className="text-white text-2xl font-bold">FISCAL</h1>
-            <p className="text-slate-400 text-sm mt-1">Your AI Budgeting Assistant</p>
+ {/* Asymmetrical Split-View Container (60/40 Layout on Large Screens) */}
+    <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 items-center gap-12 px-6 lg:px-16 xl:px-24 relative z-10 w-full min-h-[85vh]">
+      
+      {/* LEFT SIDE: Massive Logo & Brand Block (Takes up 7/12 of the width) */}
+      <div className="lg:col-span-7 flex items-center justify-center lg:justify-start w-full">
+        <div className="flex flex-row items-center gap-8 justify-start select-none">
+          
+          {/* Cinematic, Ultra-Scaled Logo Icon */}
+          <div className="relative flex items-center justify-center w-72 h-72 xl:w-[450px] xl:h-[450px] flex-shrink-0">
+            {/* Ambient Pulse Ring scaled to match the new size */}
+            <div 
+              className="absolute inset-4 rounded-full bg-teal-600/10 animate-ping" 
+              style={{ animationDuration: '3.5s' }} 
+            />
+            <Image 
+              src="/chequeuplogo.png" 
+              alt="Cheque up" 
+              width={500} 
+              height={500} 
+              className="relative z-10 object-contain w-full h-full" 
+              priority 
+            />
+          </div>
+          {/* Typography Exact Match to Cheque-Up-Wordmark.png */}
+          <div className="flex flex-col justify-center">
+            <h1 className="text-6xl xl:text-7xl font-bold tracking-tight leading-none">
+              <span className="text-[#0f3c3a]">Cheque</span>
+              <span className="text-[#0d9488]"> Up</span>
+            </h1>
+            <p className="text-slate-400 text-base xl:text-lg mt-4 font-medium max-w-sm leading-relaxed">
+              Know where your money goes. Before it's too late.
+            </p>
           </div>
 
-          {/* Auth Card */}
-          <div className="bg-[#0D1B2E]/80 backdrop-blur-xl rounded-2xl border border-slate-800/50 p-6">
-            
-            {/* Tab Toggle */}
-            <div className="flex bg-[#111827] rounded-xl p-1 mb-6">
-              <button
-                onClick={() => { setAuthMode('signin'); setAuthError('') }}
-                className={`flex-1 py-2 rounded-lg text-sm font-semibold transition ${
-                  authMode === 'signin' ? 'bg-sky-400 text-[#080E1A]' : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                Sign In
-              </button>
-              <button
-                onClick={() => { setAuthMode('signup'); setAuthError('') }}
-                className={`flex-1 py-2 rounded-lg text-sm font-semibold transition ${
-                  authMode === 'signup' ? 'bg-sky-400 text-[#080E1A]' : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                Create Account
-              </button>
-            </div>
-
-            <form onSubmit={authMode === 'signin' ? handleLogin : handleSignUp} className="flex flex-col gap-3">
-              <div className={`grid grid-cols-2 gap-3 overflow-hidden transition-all duration-300 ${
-                authMode === 'signup' ? 'max-h-20 opacity-100' : 'max-h-0 opacity-0'
-              }`}>
-                <input type="text" placeholder="First name" value={firstName} onChange={e => setFirstName(e.target.value)} className="bg-[#111827] text-white placeholder-slate-500 px-4 py-3 rounded-xl border border-slate-700 focus:border-sky-400 outline-none text-sm" />
-                <input type="text" placeholder="Last name" value={lastName} onChange={e => setLastName(e.target.value)} className="bg-[#111827] text-white placeholder-slate-500 px-4 py-3 rounded-xl border border-slate-700 focus:border-sky-400 outline-none text-sm" />
-              </div>
-              <input type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} className="bg-[#111827] text-white placeholder-slate-500 px-4 py-3 rounded-xl border border-slate-700 focus:border-sky-400 outline-none text-sm" />
-              <input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} className="bg-[#111827] text-white placeholder-slate-500 px-4 py-3 rounded-xl border border-slate-700 focus:border-sky-400 outline-none text-sm" />
-
-              <div className={`overflow-hidden transition-all duration-300 ${authMode === 'signup' ? 'max-h-20 opacity-100' : 'max-h-0 opacity-0'}`}>
-                <label className="flex items-start gap-3 cursor-pointer">
-                  <input type="checkbox" checked={acceptedTerms} onChange={e => setAcceptedTerms(e.target.checked)} className="mt-1 w-4 h-4 accent-sky-400" />
-                  <span className="text-slate-400 text-xs leading-relaxed">
-                    I agree to the{' '}
-                    <a href="/privacy" target="_blank" className="text-sky-400 underline hover:text-sky-300">Privacy Policy</a>
-                    {' '}and{' '}
-                    <a href="/terms" target="_blank" className="text-sky-400 underline hover:text-sky-300">Terms of Service</a>
-                  </span>
-                </label>
-              </div>
-
-              {authError && <p className="text-red-400 text-sm text-center">{authError}</p>}
-
-              <button type="submit" disabled={isAuthLoading || (authMode === 'signup' && !acceptedTerms)} className="bg-sky-400 text-[#080E1A] py-3 rounded-xl font-bold hover:bg-sky-300 transition disabled:opacity-50">
-                {isAuthLoading ? (authMode === 'signin' ? 'Signing in...' : 'Creating account...') : (authMode === 'signin' ? 'Sign In' : 'Create Account')}
-              </button>
-            </form>
-
-            <div className="flex items-center gap-3 my-4">
-              <div className="flex-1 h-px bg-slate-700" />
-              <span className="text-slate-500 text-xs">or</span>
-              <div className="flex-1 h-px bg-slate-700" />
-            </div>
-
-            {authMode === 'signup' && !acceptedTerms ? (
-              <button disabled className="w-full flex items-center justify-center gap-3 bg-white/50 text-gray-400 py-3 rounded-xl font-semibold cursor-not-allowed">
-                <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 01-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 009 18z"/><path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 013.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.997 8.997 0 000 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 00.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/></svg>
-                Continue with Google
-              </button>
-            ) : (
-              <button type="button" onClick={handleGoogleLogin} className="w-full flex items-center justify-center gap-3 bg-white text-gray-800 py-3 rounded-xl font-semibold hover:bg-gray-100 transition">
-                <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 01-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 009 18z"/><path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 013.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.997 8.997 0 000 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 00.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/></svg>
-                Continue with Google
-              </button>
-            )}
-          </div>
         </div>
       </div>
 
-      {/* Right side — Video (hidden on mobile) */}
-      <div className="hidden lg:flex flex-1 items-center justify-center p-8 relative z-10">
-        <div className="w-full max-w-3xl rounded-2xl overflow-hidden border border-slate-800/50 shadow-2xl shadow-sky-500/5">
-          <video
-            autoPlay
-            loop
-            muted
-            playsInline
-            className="w-full h-auto rounded-2xl"
+      {/* RIGHT SIDE: Auth Card (Takes up 5/12 of the width, cleanly right-aligned) */}
+      <div className="lg:col-span-5 flex items-center justify-center lg:justify-end w-full">
+      
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-xl shadow-slate-200/50 p-6 max-w-md w-full">
+          
+          {/* Tab Toggle */}
+          <div className="flex bg-white rounded-xl p-1 mb-6">
+            <button
+              onClick={() => { setAuthMode('signin'); setAuthError('') }}
+              className={`flex-1 py-2 rounded-lg text-sm font-semibold transition ${
+                authMode === 'signin' ? 'bg-teal-600 text-[#080E1A]' : 'text-slate-400 hover:text-slate-900'
+              }`}
+            >
+              Sign In
+            </button>
+            <button
+              onClick={() => { setAuthMode('signup'); setAuthError('') }}
+              className={`flex-1 py-2 rounded-lg text-sm font-semibold transition ${
+                authMode === 'signup' ? 'bg-teal-600 text-[#080E1A]' : 'text-slate-400 hover:text-slate-900'
+              }`}
+            >
+              Create Account
+            </button>
+          </div>
+
+          <form onSubmit={authMode === 'signin' ? handleLogin : handleSignUp} className="flex flex-col gap-3">
+            <div className={`grid grid-cols-2 gap-3 overflow-hidden transition-all duration-300 ${
+              authMode === 'signup' ? 'max-h-20 opacity-100' : 'max-h-0 opacity-0'
+            }`}>
+              <input type="text" placeholder="First name" value={firstName} onChange={e => setFirstName(e.target.value)} className="bg-white text-slate-900 placeholder-slate-500 px-4 py-3 rounded-xl border border-slate-200 focus:border-teal-600 outline-none text-sm" />
+              <input type="text" placeholder="Last name" value={lastName} onChange={e => setLastName(e.target.value)} className="bg-white text-slate-900 placeholder-slate-500 px-4 py-3 rounded-xl border border-slate-200 focus:border-teal-600 outline-none text-sm" />
+            </div>
+            <input type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} className="bg-white text-slate-900 placeholder-slate-500 px-4 py-3 rounded-xl border border-slate-200 focus:border-teal-600 outline-none text-sm" />
+            <input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} className="bg-white text-slate-900 placeholder-slate-500 px-4 py-3 rounded-xl border border-slate-200 focus:border-teal-600 outline-none text-sm" />
+
+            <div className={`overflow-hidden transition-all duration-300 ${authMode === 'signup' ? 'max-h-20 opacity-100' : 'max-h-0 opacity-0'}`}>
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input type="checkbox" checked={acceptedTerms} onChange={e => setAcceptedTerms(e.target.checked)} className="mt-1 w-4 h-4 accent-teal-600" />
+                <span className="text-slate-400 text-xs leading-relaxed">
+                  I agree to the{' '}
+                  <a href="/privacy" target="_blank" className="text-teal-600 underline hover:text-sky-300">Privacy Policy</a>
+                  {' '}and{' '}
+                  <a href="/terms" target="_blank" className="text-teal-600 underline hover:text-sky-300">Terms of Service</a>
+                </span>
+              </label>
+            </div>
+
+            {authError && <p className="text-red-400 text-sm text-center">{authError}</p>}
+
+            <button type="submit" disabled={isAuthLoading || (authMode === 'signup' && !acceptedTerms)} className="bg-teal-600 text-[#080E1A] py-3 rounded-xl font-bold hover:bg-sky-300 transition disabled:opacity-50">
+              {isAuthLoading ? (authMode === 'signin' ? 'Signing in...' : 'Creating account...') : (authMode === 'signin' ? 'Sign In' : 'Create Account')}
+            </button>
+          </form>
+
+          <div className="flex items-center gap-3 my-4">
+            <div className="flex-1 h-px bg-slate-700" />
+            <span className="text-slate-500 text-xs">or</span>
+            <div className="flex-1 h-px bg-slate-700" />
+          </div>
+
+          {authMode === 'signup' && !acceptedTerms ? (
+            <button disabled className="w-full flex items-center justify-center gap-3 bg-white/50 text-gray-400 py-3 rounded-xl font-semibold cursor-not-allowed">
+              <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 01-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 009 18z"/><path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 013.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.997 8.997 0 000 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 00.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/></svg>
+              Continue with Google
+            </button>
+          ) : (
+            <button type="button" onClick={handleGoogleLogin} className="w-full flex items-center justify-center gap-3 bg-white text-gray-800 py-3 rounded-xl font-semibold hover:bg-gray-100 transition">
+              <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 01-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 009 18z"/><path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 013.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.997 8.997 0 000 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 00.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/></svg>
+              Continue with Google
+            </button>
+          )}
+
+          {/* Divider */}
+          <div className="flex items-center gap-3 my-4">
+            <div className="flex-1 h-px bg-slate-700" />
+            <span className="text-slate-500 text-xs">or</span>
+            <div className="flex-1 h-px bg-slate-700" />
+          </div>
+
+          {/* Try Cheque up button */}
+          <button
+            type="button"
+            onClick={() => {
+              const trialData = localStorage.getItem('fiscal_trial')
+              if (trialData) {
+                const parsed = JSON.parse(trialData)
+                const elapsed = Date.now() - parsed.startedAt
+                const hoursElapsed = elapsed / (1000 * 60 * 60)
+                
+                if (hoursElapsed >= 24) {
+                  localStorage.setItem('fiscal_trial', JSON.stringify({
+                    promptsUsed: 0,
+                    startedAt: Date.now()
+                  }))
+                  setTrialPromptsUsed(0)
+                } else if (parsed.promptsUsed >= TRIAL_LIMIT) {
+                  setAuthError(`Trial limit reached. Create a free account or try again in ${Math.ceil(24 - hoursElapsed)} hours.`)
+                  return
+                } else {
+                  setTrialPromptsUsed(parsed.promptsUsed)
+                }
+              } else {
+                localStorage.setItem('fiscal_trial', JSON.stringify({
+                  promptsUsed: 0,
+                  startedAt: Date.now()
+                }))
+              }
+              setIsTrialMode(true)
+            }}
+            className="w-full py-3 rounded-xl font-semibold text-sm text-yellow-500 border border-yellow-400 hover:bg-yellow-50 transition"
           >
-            <source src="/FiscalLogo_long.mp4" type="video/mp4" />
-          </video>
+            ✨ Try Cheque up — no account needed
+          </button>
         </div>
       </div>
+
+    </div>
+
+    
     </div>
   )
 }
 
   // Chat Screen
   return (
-    <div className="h-screen bg-[#080E1A] flex overflow-hidden">
-
-      {/* Sidebar overlay on mobile */}
-      {sidebarOpen && (
-        <div
-          className="fixed inset-0 bg-black/60 z-20 md:hidden"
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
+    <div className="h-screen bg-slate-50 flex overflow-hidden">
 
      {/* Sidebar */}
-<aside className={`fixed md:relative z-30 h-screen bg-[#0D1B2E] border-r border-slate-800 flex flex-col transition-all duration-300 ${
-  sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
-} ${sidebarCollapsed ? 'md:w-14' : 'w-72'}`}>
-  
-  {/* Sidebar Header */}
-  <div className="p-3 border-b border-slate-800 flex items-center justify-between shrink-0">
-    {!sidebarCollapsed && (
-      <div className="flex items-center gap-2">
-        <Image src="/fiscallogo_nobg.png" alt="FISCAL" width={24} height={24} />
-        <span className="text-white font-bold text-sm">FISCAL</span>
-      </div>
-    )}
-    <button
-      onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-      className="text-slate-400 hover:text-white transition ml-auto hidden md:block"
-    >
-      {sidebarCollapsed ? '→' : '←'}
-    </button>
-    <button
-      onClick={() => setSidebarOpen(false)}
-      className="text-slate-400 hover:text-white transition md:hidden"
-    >
-      ✕
-    </button>
-  </div>
 
-  {!sidebarCollapsed && (
-    <>
-{/* New Conversation */}
-<div className="p-3 shrink-0">
-  <button
-    onClick={newConversation}
-    className="w-full bg-sky-400 text-[#080E1A] py-2 rounded-xl font-semibold text-sm hover:bg-sky-300 transition"
-  >
-    + New Conversation
-  </button>
-  <button
-    onClick={async () => {
-      setActiveTab('calendar')
-      setSidebarOpen(false)
-      if (plaidAccessToken && !calendarData) {
-        setCalendarLoading(true)
-        try {
-          const res = await fetch(`${HF_URL}/plaid/recurring`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${authToken}`
-            },
-            body: JSON.stringify({ message: '', access_token: plaidAccessToken })
-          })
-          const data = await res.json()
-          setCalendarData(data)
-        } catch (e) {
-          console.error('Calendar data error:', e)
-        }
-        setCalendarLoading(false)
-      }
-    }}
-    className={`w-full mt-2 py-2 rounded-xl font-semibold text-sm transition flex items-center justify-center gap-2 ${
-      activeTab === 'calendar'
-        ? 'bg-sky-400/10 text-sky-400 border border-sky-400/20'
-        : 'text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-700'
-    }`}
-  >
-    📅 Calendar
-  </button>
-</div>
-
-      {/* Search */}
-      <div className="px-3 pb-3 shrink-0">
-        <div className="flex items-center bg-[#111827] rounded-xl px-3 py-2 border border-slate-700 focus-within:border-sky-400/50 transition">
-          <span className="text-slate-500 text-xs mr-2">🔍</span>
-          <input
-            type="text"
-            placeholder="Search conversations..."
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            className="bg-transparent text-white placeholder-slate-500 outline-none text-xs flex-1"
-          />
-          {searchQuery && (
-            <button onClick={() => setSearchQuery('')} className="text-slate-500 hover:text-white text-xs">✕</button>
-          )}
-        </div>
-      </div>
-
-      {/* Conversations List */}
-      <div className="flex-1 overflow-y-auto px-2 min-h-0">
-        {conversations.length === 0 && (
-          <p className="text-slate-500 text-xs text-center mt-4">No conversations yet</p>
-        )}
-        {conversations
-          .filter(c => c.title.toLowerCase().includes(searchQuery.toLowerCase()))
-          .map(conv => (
-            <div
-              key={conv.id}
-              onClick={() => loadConversation(conv)}
-              className={`flex items-center justify-between px-3 py-2 rounded-xl cursor-pointer group mb-1 ${
-                currentConvId === conv.id ? 'bg-sky-400/10 border border-sky-400/20' : 'hover:bg-slate-800'
-              }`}
-            >
-              <span className="text-slate-300 text-xs truncate flex-1">{conv.title}</span>
-              <button
-                onClick={(e) => deleteConversation(conv.id, e)}
-                className="text-slate-600 hover:text-red-400 ml-2 opacity-0 group-hover:opacity-100 transition text-xs shrink-0"
-              >
-                ✕
-              </button>
-            </div>
-          ))}
-        {searchQuery && conversations.filter(c => c.title.toLowerCase().includes(searchQuery.toLowerCase())).length === 0 && (
-          <p className="text-slate-500 text-xs text-center mt-4">No results found</p>
-        )}
-      </div>
-
-{/* Bank + Sign Out */}
-<div className="p-4 border-t border-slate-800 shrink-0 flex flex-col gap-3">
-<PlaidLinkButton
-  authToken={authToken}
-  plaidLinked={plaidLinked}
-  triggerOpen={triggerPlaidLink}
-  onTriggered={() => setTriggerPlaidLink(false)}
-
-  onSuccess={async (accessToken) => {
-  setPlaidAccessToken(accessToken)
-  setPlaidLinked(true)
-  setCalendarData(null)  // Force refetch
-  setChartData(null)
-  // Wait for Plaid to sync transactions
-  if (activeTab === 'calendar') {
-    setCalendarLoading(true)
-    fetchCalendarData(accessToken)
-
-    // Delay 3 seconds to let Plaid sync
-    await new Promise(resolve => setTimeout(resolve, 3000))
-    try {
-      const res = await fetch(`${HF_URL}/plaid/recurring`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${authToken}`
-        },
-        body: JSON.stringify({ message: '', access_token: accessToken })
-      })
-      const data = await res.json()
-      setCalendarData(data)
-    } catch (e) {
-      console.error('Calendar fetch error:', e)
-    }
-    setCalendarLoading(false)
-  }
-}}
-  onDisconnect={() => {
-    setPlaidLinked(false)
-    setPlaidAccessToken('')
-    setCalendarData(null)
-    setChartData(null)
-  }}
-/>
-  <button
-    onClick={async () => {
-      await supabase.auth.signOut()
-      setIsLoggedIn(false)
-      setMessages([])
-      setAuthToken('')
-      setConversations([])
-      setPlaidLinked(false)
-      setPlaidAccessToken('')
-    }}
-    className="text-slate-400 hover:text-white text-sm transition w-full text-left"
-  >
-    Sign Out
-  </button>
-  </div>
-    </>
-  )}
-
-  {/* Collapsed state — just icons */}
-  {sidebarCollapsed && (
-    <div className="flex flex-col items-center gap-4 py-4">
-      <button
-        onClick={newConversation}
-        className="text-sky-400 hover:text-sky-300 transition text-lg"
-        title="New Conversation"
-      >
-        ✏️
-      </button>
-    </div>
-  )}
-</aside>
 
  {/* Main Chat */}
       <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
-        
-        {/* Mobile Header */}
-        <header className="flex items-center px-4 py-4 border-b border-slate-800 md:hidden">
-          <button
-            onClick={() => setSidebarOpen(true)}
-            className="text-slate-400 hover:text-white mr-3"
-          >
-            ☰
-          </button>
-          <span className="text-white font-bold">FISCAL</span>
-        </header>
+      
 
-        {/* Tab Toggle — always visible */}
-        <div className="flex border-b border-slate-800 shrink-0">
-          <button
-            onClick={() => setActiveTab('chat')}
-            className={`flex-1 py-3 text-sm font-semibold transition ${
-              activeTab === 'chat'
-                ? 'text-sky-400 border-b-2 border-sky-400'
-                : 'text-slate-500 hover:text-slate-300'
-            }`}
-          >
-            Chat
-          </button>
-      <button
-        onClick={async () => {
-          setActiveTab('dashboard')
-          if (plaidAccessToken && !chartData) loadChartData()
-          if (canadianBanks.length === 0 && authToken) {
-            try {
-              const res = await fetch(`${HF_URL}/plaid/canadian_banks`, {
-                headers: { 'Authorization': `Bearer ${authToken}` }
-              })
-              const data = await res.json()
-              if (data.banks) setCanadianBanks(data.banks)
-            } catch (e) {
-              console.error('Banks fetch error:', e)
-            }
-          }
-        }}
-        className={`flex-1 py-3 text-sm font-semibold transition ${
-          activeTab === 'dashboard'
-            ? 'text-sky-400 border-b-2 border-sky-400'
-            : 'text-slate-500 hover:text-slate-300'
-        }`}
-      >
-        Dashboard
-      </button>
-        </div>
+      {/* Input — or sign up prompt when trial exhausted */}
+        {isTrialMode && trialPromptsUsed >= TRIAL_LIMIT ? (
+          <div className="px-4 py-6 border-t border-slate-200 max-w-3xl mx-auto w-full shrink-0 text-center">
+            <p className="text-slate-900 font-semibold mb-2">You've used all {TRIAL_LIMIT} free prompts</p>
+            <p className="text-slate-400 text-sm mb-4">
+              {plaidLinked 
+                ? "Create a free account to keep your bank connection and get unlimited conversations." 
+                : "Create a free account to continue with unlimited conversations, bank connection, and more."}
+            </p>
+            <div className="flex gap-3 justify-center">
+              <button
+                onClick={() => {
+                  setIsTrialMode(false)
+                  setMessages([])
+                  setHasStarted(false)
+                  setAuthMode('signup')
+                }}
+                className="bg-teal-600 text-[#080E1A] px-6 py-3 rounded-xl font-bold hover:bg-sky-300 transition"
+              >
+                Create Free Account
+              </button>
+              <button
+                onClick={() => {
+                  setIsTrialMode(false)
+                  setMessages([])
+                  setHasStarted(false)
+                }}
+                className="border border-slate-200 text-slate-400 px-6 py-3 rounded-xl font-semibold hover:border-teal-600 hover:text-teal-600 transition"
+              >
+                Sign In
+              </button>
+            </div>
+          </div>
+        ) : (<p></p>)}
 
   {activeTab === 'calendar' ? (
   /* Calendar view — paste the entire calendar JSX here */
-  <div className="flex-1 overflow-y-auto px-4 py-6 max-w-4xl mx-auto w-full min-h-0">
+  <div className="flex-1 overflow-y-auto px-4 pt-6 pb-28 max-w-4xl mx-auto w-full min-h-0">
     {calendarLoading ? (
   <div className="flex flex-col items-center justify-center h-64 gap-3">
-    <div className="w-8 h-8 border-[3px] border-sky-400 border-t-transparent rounded-full animate-spin" />
-    <div className="text-sky-400 text-sm">Analyzing your transactions...</div>
+    <div className="w-8 h-8 border-[3px] border-teal-600 border-t-transparent rounded-full animate-spin" />
+    <div className="text-teal-600 text-sm">Analyzing your transactions...</div>
     <p className="text-slate-500 text-xs">This can take a minute after connecting your bank</p>
   </div>
 ) : !calendarData ? (
       <div className="flex flex-col items-center justify-center h-64 gap-4">
-        <span className="text-4xl">📅</span>
+        <span className="text-4xl"><Image src="/Calendar.png" alt="Calendar" width={50} height={50} className="relative z-10 object-contain w-30 h-30" priority /></span>
         <p className="text-slate-400 text-sm">Connect your bank to see your financial calendar</p>
-        <button onClick={() => setTriggerPlaidLink(true)} className="bg-sky-400 text-[#080E1A] px-6 py-3 rounded-xl font-semibold hover:bg-sky-300 transition">
+       <button
+          onClick={() => {
+            /*if (isTrialMode) {
+              setTrialPopup(true)
+              return
+            }*/
+            setTriggerPlaidLink(true)
+          }}
+          className="bg-teal-600 text-[#080E1A] px-6 py-3 rounded-xl font-semibold hover:bg-sky-300 transition"
+        >
           🔗 Connect Your Bank
         </button>
       </div>
     ) : (
       <div className="space-y-6">
         {calendarData && (
-          <div className="bg-[#0D1B2E] rounded-xl p-3 border border-slate-800 flex items-center justify-between mb-4">
+          <div className="bg-white rounded-xl p-3 border border-slate-200 flex items-center justify-between mb-4">
             <p className="text-slate-400 text-xs">
               Found {calendarData.recurring_expenses?.length || 0} recurring expenses and {calendarData.recurring_income?.length || 0} income sources
             </p>
@@ -1071,7 +1001,7 @@ const extractChartData = (text: string): { cleanText: string; chart: any | null 
                 setCalendarData(null)
                 fetchCalendarData(plaidAccessToken)
               }}
-              className="text-sky-400 hover:text-sky-300 text-xs transition"
+              className="text-teal-600 hover:text-sky-300 text-xs transition"
             >
               ↻ Refresh
             </button>
@@ -1081,25 +1011,25 @@ const extractChartData = (text: string): { cleanText: string; chart: any | null 
         <div className="flex items-center justify-between">
           <button
             onClick={() => setCalendarMonth(prev => new Date(prev.getFullYear(), prev.getMonth() - 1))}
-            className="text-slate-400 hover:text-white transition px-3 py-1"
+            className="text-slate-400 hover:text-slate-900 transition px-3 py-1"
           >
             ← Prev
           </button>
-          <h2 className="text-white font-bold text-lg">
+          <h2 className="text-slate-900 font-bold text-lg">
             {calendarMonth.toLocaleDateString('en-CA', { month: 'long', year: 'numeric' })}
           </h2>
           <button
             onClick={() => setCalendarMonth(prev => new Date(prev.getFullYear(), prev.getMonth() + 1))}
-            className="text-slate-400 hover:text-white transition px-3 py-1"
+            className="text-slate-400 hover:text-slate-900 transition px-3 py-1"
           >
             Next →
           </button>
         </div>
 
         {/* Calendar Grid */}
-        <div className="bg-[#111827] rounded-2xl border border-slate-800 overflow-hidden">
+        <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
           {/* Day headers */}
-          <div className="grid grid-cols-7 border-b border-slate-800">
+          <div className="grid grid-cols-7 border-b border-slate-200">
             {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
               <div key={d} className="text-center text-slate-500 text-xs py-2 font-semibold">{d}</div>
             ))}
@@ -1117,7 +1047,7 @@ const extractChartData = (text: string): { cleanText: string; chart: any | null 
 
               // Empty cells before first day
               for (let i = 0; i < firstDay; i++) {
-                cells.push(<div key={`empty-${i}`} className="min-h-[80px] border-b border-r border-slate-800/50" />)
+                cells.push(<div key={`empty-${i}`} className="min-h-[80px] border-b border-r border-slate-200/50" />)
               }
 
               // Day cells
@@ -1127,8 +1057,8 @@ const extractChartData = (text: string): { cleanText: string; chart: any | null 
                 const events = calendarData.projected_events?.filter((e: any) => e.date === dateStr) || []
 
                 cells.push(
-                  <div key={day} className={`min-h-[80px] border-b border-r border-slate-800/50 p-1 ${isToday ? 'bg-sky-400/5' : ''}`}>
-                    <span className={`text-xs font-semibold block mb-1 ${isToday ? 'text-sky-400' : 'text-slate-400'}`}>
+                  <div key={day} className={`min-h-[80px] border-b border-r border-slate-200/50 p-1 ${isToday ? 'bg-teal-600/5' : ''}`}>
+                    <span className={`text-xs font-semibold block mb-1 ${isToday ? 'text-teal-600' : 'text-slate-400'}`}>
                       {day}
                     </span>
                     {events.map((event: any, idx: number) => (
@@ -1156,16 +1086,16 @@ const extractChartData = (text: string): { cleanText: string; chart: any | null 
         {/* Recurring Summary */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* Income */}
-          <div className="bg-[#111827] rounded-2xl p-4 border border-slate-800">
+          <div className="bg-white rounded-2xl p-4 border border-slate-200">
             <h3 className="text-emerald-400 font-bold text-sm mb-3">💰 Recurring Income</h3>
             {calendarData.recurring_income?.length === 0 ? (
               <p className="text-slate-500 text-xs">No recurring income detected yet</p>
             ) : (
               <div className="space-y-2">
                 {calendarData.recurring_income?.map((item: any, i: number) => (
-                  <div key={i} className="flex items-center justify-between bg-[#0D1B2E] rounded-xl p-3 border border-slate-700">
+                  <div key={i} className="flex items-center justify-between bg-white rounded-xl p-3 border border-slate-200">
                     <div>
-                      <p className="text-white text-xs font-semibold">{item.merchant}</p>
+                      <p className="text-slate-900 text-xs font-semibold">{item.merchant}</p>
                       <p className="text-slate-500 text-[10px]">{item.frequency} • {item.consecutive_months} months</p>
                     </div>
                     <div className="text-right">
@@ -1183,16 +1113,16 @@ const extractChartData = (text: string): { cleanText: string; chart: any | null 
           </div>
 
           {/* Expenses */}
-          <div className="bg-[#111827] rounded-2xl p-4 border border-slate-800">
+          <div className="bg-white rounded-2xl p-4 border border-slate-200">
             <h3 className="text-red-400 font-bold text-sm mb-3">💸 Recurring Expenses</h3>
             {calendarData.recurring_expenses?.length === 0 ? (
               <p className="text-slate-500 text-xs">No recurring expenses detected yet</p>
             ) : (
               <div className="space-y-2">
                 {calendarData.recurring_expenses?.map((item: any, i: number) => (
-                  <div key={i} className="flex items-center justify-between bg-[#0D1B2E] rounded-xl p-3 border border-slate-700">
+                  <div key={i} className="flex items-center justify-between bg-white rounded-xl p-3 border border-slate-200">
                     <div>
-                      <p className="text-white text-xs font-semibold">{item.merchant}</p>
+                      <p className="text-slate-900 text-xs font-semibold">{item.merchant}</p>
                       <p className="text-slate-500 text-[10px]">{item.frequency} • {item.consecutive_months} months</p>
                     </div>
                     <div className="text-right">
@@ -1234,13 +1164,13 @@ const extractChartData = (text: string): { cleanText: string; chart: any | null 
                 console.error('Calendar export error:', e)
               }
             }}
-            className="bg-sky-400 text-[#080E1A] px-6 py-3 rounded-xl font-semibold hover:bg-sky-300 transition flex items-center gap-2"
+            className="bg-teal-600 text-[#080E1A] px-6 py-3 rounded-xl font-semibold hover:bg-sky-300 transition flex items-center gap-2"
           >
             📥 Export to Calendar (.ics)
           </button>
           <button
             onClick={() => fetchCalendarData(plaidAccessToken)}
-            className="text-sky-400 hover:text-sky-300 text-sm transition px-4 py-3"
+            className="text-teal-600 hover:text-sky-300 text-sm transition px-4 py-3"
           >
             ↻ Refresh
           </button>
@@ -1260,22 +1190,24 @@ const extractChartData = (text: string): { cleanText: string; chart: any | null 
         <div className={`relative flex items-center justify-center transition-all duration-700 ${
           hasStarted ? 'w-16 h-16' : 'w-40 h-40'
         }`}>
-          <div className="absolute inset-0 rounded-full bg-sky-400/10 animate-ping" style={{ animationDuration: isResponding ? '0.8s' : '2s' }} />
-          <div className="absolute inset-2 rounded-full bg-sky-400/15 animate-pulse" style={{ animationDuration: isResponding ? '0.6s' : '1.6s' }} />
-          <div className="absolute inset-4 rounded-full bg-sky-400/20 animate-pulse" style={{ animationDuration: isResponding ? '0.6s' : '1.6s' }} />
-          <Image src="/fiscallogo_nobg.png" alt="FISCAL" width={hasStarted ? 48 : 120} height={hasStarted ? 48 : 120} className="relative z-10 transition-all duration-700" />
+          <div className="absolute inset-0 rounded-full bg-teal-600/10 animate-ping" style={{ animationDuration: isResponding ? '0.8s' : '2s' }} />
+          <Image src="/chequeuplogo.png" alt="Cheque up" width={hasStarted ? 48 : 120} height={hasStarted ? 48 : 120} className="relative z-10 transition-all duration-700" />
         </div>
         <div className={`transition-all duration-500 overflow-hidden ${hasStarted ? 'max-h-0 opacity-0 mt-0' : 'max-h-40 opacity-100 mt-4'}`}>
-          <p className="text-slate-400 text-center max-w-sm">Ask me anything about your Canadian finances — budgeting, investing, TFSAs, RRSPs, and more.</p>
-        </div>
+        <p className="text-slate-400 text-center max-w-sm">
+          {firstNameDisplay 
+            ? `Hello ${firstNameDisplay}, how can I assist today?` 
+            : 'Hello, how can I assist today?'}
+        </p>       
+      </div>
       </div>
 
       {/* Suggestion chips */}
       {!hasStarted && (
         <div className="flex flex-col items-center">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-md px-4">
-            {['How do I start investing?', 'What is a TFSA?', 'Help me budget', 'Best savings account?'].map(s => (
-              <button key={s} onClick={() => setInput(s)} className="bg-[#111827] text-slate-300 text-sm px-4 py-3 rounded-xl border border-slate-700 hover:border-sky-400/50 transition text-left">{s}</button>
+            {['Where does my money actually go each month?', 'Why am I always broke by the 25th?', 'Help me make sense of my spending', 'What does the 50/30/20 budget rule look like?'].map(s => (
+              <button key={s} onClick={() => setInput(s)} className="bg-white text-slate-300 text-sm px-4 py-3 rounded-xl border border-slate-200 hover:border-teal-600/50 transition text-left">{s}</button>
             ))}
           </div>
         </div>
@@ -1288,21 +1220,21 @@ const extractChartData = (text: string): { cleanText: string; chart: any | null 
     <div className={`flex ${msg.isUser ? 'justify-end' : 'justify-start'} animate-fadeIn`}>
       {!msg.isUser && (
         <div className="w-7 h-7 shrink-0 mr-3 mt-1">
-          <Image src="/fiscallogo_nobg.png" alt="F" width={28} height={28} className="rounded-lg w-full h-full object-contain" />
+          <Image src="/chequeuplogo.png" alt="F" width={28} height={28} className="rounded-lg w-full h-full object-contain" />
         </div>
       )}
       
       {/* Message + Chart side by side when chart exists */}
 {msg.chartData && !msg.isUser && msg.chartData.type ? (
   <div className="flex flex-col lg:flex-row gap-4 max-w-4xl">
-    <div className="flex-1 bg-[#111827] px-4 py-3 rounded-2xl text-sm leading-relaxed text-slate-200 rounded-bl-sm">
-      <ReactMarkdown components={{
-        p: ({children}) => <p className="mb-3 last:mb-0">{children}</p>,
-        strong: ({children}) => <strong className="font-semibold text-sky-300">{children}</strong>,
+    <div className="flex-1 bg-white px-4 py-3 rounded-2xl text-sm leading-relaxed text-[#004B57] rounded-bl-sm">
+  <ReactMarkdown components={{
+    p: ({children}) => <p className="mb-3 last:mb-0">{children}</p>,
+    strong: ({children}) => <strong className="font-semibold text-[#E07A5F]">{children}</strong>,
         ol: ({children}) => <ol className="list-decimal list-inside space-y-3 my-2">{children}</ol>,
         ul: ({children}) => <ul className="list-disc list-inside space-y-3 my-2">{children}</ul>,
         li: ({children}) => <li className="ml-2">{children}</li>,
-        code: ({children}) => <code className="bg-slate-800 px-1 py-0.5 rounded text-sky-300 text-xs">{children}</code>,
+        code: ({children}) => <code className="bg-slate-100 text-[#004B57] text-xs">{children}</code>,
       }}>{cleanMarkdown(msg.text)}</ReactMarkdown>
     </div>
     <div className="w-full lg:w-[450px] shrink-0 animate-chartFadeIn">
@@ -1311,45 +1243,45 @@ const extractChartData = (text: string): { cleanText: string; chart: any | null 
   </div>
 ) : inlineChartLoading && !msg.isUser && i === messages.length - 1 ? (
   <div className="flex flex-col lg:flex-row gap-4 max-w-4xl">
-    <div className="flex-1 bg-[#111827] px-4 py-3 rounded-2xl text-sm leading-relaxed text-slate-200 rounded-bl-sm">
-      <ReactMarkdown components={{
-        p: ({children}) => <p className="mb-3 last:mb-0">{children}</p>,
-        strong: ({children}) => <strong className="font-semibold text-sky-300">{children}</strong>,
+    <div className="flex-1 bg-white px-4 py-3 rounded-2xl text-sm leading-relaxed text-slate-200 rounded-bl-sm">
+  <ReactMarkdown components={{
+    p: ({children}) => <p className="mb-3 last:mb-0">{children}</p>,
+    strong: ({children}) => <strong className="font-semibold text-sky-300">{children}</strong>,
         ol: ({children}) => <ol className="list-decimal list-inside space-y-3 my-2">{children}</ol>,
         ul: ({children}) => <ul className="list-disc list-inside space-y-3 my-2">{children}</ul>,
         li: ({children}) => <li className="ml-2">{children}</li>,
-        code: ({children}) => <code className="bg-slate-800 px-1 py-0.5 rounded text-sky-300 text-xs">{children}</code>,
+        code: ({children}) => <code className="bg-slate-100 px-1 py-0.5 rounded text-[#004B57] text-xs">{children}</code>,
       }}>{cleanMarkdown(msg.text)}</ReactMarkdown>
     </div>
     <div className="w-full lg:w-[450px] shrink-0 flex items-center justify-center">
       <div className="flex flex-col items-center gap-3">
-        <div className="w-8 h-8 border-[3px] border-sky-400 border-t-transparent rounded-full animate-spin" />
+        <div className="w-8 h-8 border-[3px] border-teal-600 border-t-transparent rounded-full animate-spin" />
         <span className="text-slate-400 text-sm">Generating chart...</span>
       </div>
     </div>
   </div>
 ) : (
-   <div className={`max-w-xl px-4 py-3 rounded-2xl text-sm leading-relaxed ${msg.isUser ? 'bg-sky-500 text-white rounded-br-sm' : 'bg-[#111827] text-slate-200 rounded-bl-sm'}`}>
+   <div className={`max-w-xl px-4 py-3 rounded-2xl text-sm leading-relaxed ${msg.isUser ? 'bg-sky-500 text-slate-900 rounded-br-sm' : 'bg-white text-[#004B57] rounded-bl-sm'}`}>
     {msg.text ? (
       msg.isUser ? msg.text : (
         <ReactMarkdown components={{
           p: ({children}) => <p className="mb-3 last:mb-0">{children}</p>,
-          strong: ({children}) => <strong className="font-semibold text-sky-300">{children}</strong>,
+          strong: ({children}) => <strong className="font-semibold text-[#E07A5F]">{children}</strong>,
           ol: ({children}) => <ol className="list-decimal list-inside space-y-3 my-2">{children}</ol>,
           ul: ({children}) => <ul className="list-disc list-inside space-y-3 my-2">{children}</ul>,
           li: ({children}) => <li className="ml-2">{children}</li>,
           h1: ({children}) => <h1 className="text-lg font-bold mb-2">{children}</h1>,
           h2: ({children}) => <h2 className="text-base font-bold mb-2">{children}</h2>,
           h3: ({children}) => <h3 className="text-sm font-bold mb-1">{children}</h3>,
-          code: ({children}) => <code className="bg-slate-800 px-1 py-0.5 rounded text-sky-300 text-xs">{children}</code>,
+          code: ({children}) => <code className="bg-slate-100 px-1 py-0.5 rounded text-[#004B57] text-xs">{children}</code>,
         }}>{cleanMarkdown(msg.text)}</ReactMarkdown>
       )
     ) : (isResponding && i === messages.length - 1 ? (
-      <span className="flex gap-1">
-        <span className="animate-bounce">●</span>
-        <span className="animate-bounce" style={{animationDelay:'0.1s'}}>●</span>
-        <span className="animate-bounce" style={{animationDelay:'0.2s'}}>●</span>
-      </span>
+        <span className="flex gap-1 text-yellow-400">
+          <span className="animate-bounce">●</span>
+          <span className="animate-bounce" style={{animationDelay:'0.1s'}}>●</span>
+          <span className="animate-bounce" style={{animationDelay:'0.2s'}}>●</span>
+        </span>
     ) : '')}
   </div>
 )}
@@ -1361,42 +1293,59 @@ const extractChartData = (text: string): { cleanText: string; chart: any | null 
       <div ref={messagesEndRef} />
     </div>
 
-    {/* Input */}
-    <div className="px-4 py-4 border-t border-slate-800 max-w-3xl mx-auto w-full shrink-0">
-      <div className="flex gap-3 bg-[#111827] rounded-2xl px-4 py-3 border border-slate-700 focus-within:border-sky-400/50 transition">
-        <input
-          type="text"
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage()}
-          placeholder="Ask FISCAL"
-          className="flex-1 bg-transparent text-white placeholder-slate-500 outline-none text-sm"
-        />
-        <button
-          onClick={sendMessage}
-          disabled={!input.trim() || isResponding}
-          className="bg-sky-400 text-[#080E1A] w-8 h-8 rounded-lg flex items-center justify-center font-bold disabled:opacity-40 hover:bg-sky-300 transition shrink-0"
-        >
-          ➤
-        </button>
-      </div>
-      <p className="text-slate-600 text-xs text-center mt-2">FISCAL can make mistakes. Verify important financial decisions.</p>
-    </div>
+    
+  {/* Input */}
+<div className="px-4 pt-4 pb-24 border-t border-slate-200 max-w-3xl mx-auto w-full shrink-0">
+  <div className="flex gap-3 bg-white rounded-2xl px-4 py-3 border border-slate-200 focus-within:border-teal-600/50 transition">
+    <input
+      type="text"
+      value={input}
+      onChange={e => setInput(e.target.value)}
+      onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage()}
+      placeholder="Wanna check up?"
+      className="flex-1 bg-transparent text-slate-900 placeholder-slate-500 outline-none text-sm"
+    />
+    <button
+      onClick={sendMessage}
+      disabled={!input.trim() || isResponding}
+      className="bg-teal-600 text-[#080E1A] w-8 h-8 rounded-lg flex items-center justify-center font-bold disabled:opacity-40 hover:bg-sky-300 transition shrink-0"
+    >
+      ➤
+    </button>
+  </div>
+  <p className="text-slate-600 text-xs text-center mt-2">Cheque up can make mistakes. Verify important financial decisions.</p>
+  
+  {isTrialMode && (
+    <p className="text-slate-400 text-[10px] text-center leading-relaxed mt-1">
+      Cheque up is AI. By using it, you agree to our{' '}
+      <a href="/terms" target="_blank" className="text-teal-600 underline">Terms</a> &{' '}
+      <a href="/privacy" target="_blank" className="text-teal-600 underline">Privacy Policy</a>. 
+      Don't share sensitive info. Chats may be reviewed to improve our AI.
+    </p>
+  )}
+</div>
   </>
 ) : (
   /* Dashboard */
   
-<div className="flex-1 overflow-y-auto px-4 py-6 max-w-4xl mx-auto w-full min-h-0">
+<div className="flex-1 overflow-y-auto px-4 pt-6 pb-28 max-w-4xl mx-auto w-full min-h-0">
    
     {chartLoading ? (
       <div className="flex items-center justify-center h-full">
-        <div className="text-sky-400 animate-pulse text-lg">Loading your financial data...</div>
+        <div className="text-teal-600 animate-pulse text-lg">Loading your financial data...</div>
       </div>
     ) : !chartData ? (
       
   <div className="flex flex-col items-center justify-center h-full gap-4">
-    <div className="w-16 h-16 rounded-full bg-[#111827] flex items-center justify-center border border-slate-800">
-      <span className="text-3xl">🏦</span>
+    <div className="w-16 h-16 rounded-full bg-white flex items-center justify-center border border-slate-200">
+      <span className="text-3xl">  <Image 
+              src="/Bank.png" 
+              alt="Bank" 
+              width={50} 
+              height={50} 
+              className="relative z-10 object-contain w-full h-full" 
+              priority 
+            /></span>
     </div>
     <p className="text-slate-400 text-sm">No bank data available</p>
     <p className="text-slate-500 text-xs text-center max-w-xs">Connect your bank account in the sidebar to see your spending velocity, balances, and more.</p>
@@ -1408,12 +1357,16 @@ const extractChartData = (text: string): { cleanText: string; chart: any | null 
         <button
           key={bank.institution_id}
           onClick={() => {
-            if (!plaidLinked) setTriggerPlaidLink(true)
+              if (isTrialMode) {
+                setTrialPopup(true)
+                return
+              }
+            setTriggerPlaidLink(true)
           }}
           className={`flex flex-col items-center gap-2 p-4 rounded-2xl border transition shrink-0 w-24 ${
             bankInfo?.name === bank.name
-              ? 'bg-sky-400/10 border-sky-400/30'
-              : 'bg-[#111827] border-slate-800 hover:border-slate-600'
+              ? 'bg-teal-600/10 border-teal-600/30'
+              : 'bg-white border-slate-200 hover:border-slate-600'
           }`}
         >
           {bank.logo ? (
@@ -1424,7 +1377,7 @@ const extractChartData = (text: string): { cleanText: string; chart: any | null 
             />
           ) : (
             <div
-              className="w-10 h-10 rounded-lg flex items-center justify-center text-white font-bold text-sm"
+              className="w-10 h-10 rounded-lg flex items-center justify-center text-slate-900 font-bold text-sm"
               style={{ backgroundColor: bank.color || '#38bdf8' }}
             >
               {bank.name.charAt(0)}
@@ -1440,7 +1393,7 @@ const extractChartData = (text: string): { cleanText: string; chart: any | null 
       {/* Other bank button */}
       <button
         onClick={() => setTriggerPlaidLink(true)}
-        className="flex flex-col items-center gap-2 p-4 rounded-2xl border bg-[#111827] border-slate-800 hover:border-slate-600 transition shrink-0 w-24"
+        className="flex flex-col items-center gap-2 p-4 rounded-2xl border bg-white border-slate-200 hover:border-slate-600 transition shrink-0 w-24"
       >
         <div className="w-10 h-10 rounded-lg bg-slate-700 flex items-center justify-center text-slate-400 text-xl">
           +
@@ -1455,14 +1408,14 @@ const extractChartData = (text: string): { cleanText: string; chart: any | null 
       <div className="space-y-8">
 
         {/* Account Balances */}
-        <div className="bg-[#111827] rounded-2xl p-6 border border-slate-800">
-          <h2 className="text-white font-bold text-lg mb-4">Account Balances</h2>
+        <div className="bg-white rounded-2xl p-6 border border-slate-200">
+          <h2 className="text-slate-900 font-bold text-lg mb-4">Account Balances</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {chartData.accounts?.map((acc: any) => (
-              <div key={acc.name} className="bg-[#0D1B2E] rounded-xl p-4 border border-slate-700">
+              <div key={acc.name} className="bg-white rounded-xl p-4 border border-slate-200">
                 <p className="text-slate-400 text-xs">{acc.type}</p>
-                <p className="text-white font-semibold text-sm mt-1">{acc.name}</p>
-                <p className="text-sky-400 text-xl font-bold mt-2">${acc.balance.toLocaleString('en-CA', { minimumFractionDigits: 2 })}</p>
+                <p className="text-slate-900 font-semibold text-sm mt-1">{acc.name}</p>
+                <p className="text-teal-600 text-xl font-bold mt-2">${acc.balance.toLocaleString('en-CA', { minimumFractionDigits: 2 })}</p>
               </div>
             ))}
           </div>
@@ -1470,11 +1423,11 @@ const extractChartData = (text: string): { cleanText: string; chart: any | null 
 
         {/* Income vs Expenses Summary */}
         <div className="grid grid-cols-2 gap-4">
-          <div className="bg-[#111827] rounded-2xl p-6 border border-slate-800 text-center">
+          <div className="bg-white rounded-2xl p-6 border border-slate-200 text-center">
             <p className="text-slate-400 text-xs mb-1">Income This Month</p>
             <p className="text-emerald-400 text-2xl font-bold">+${(chartData.income_total || 0).toLocaleString('en-CA', { minimumFractionDigits: 2 })}</p>
           </div>
-          <div className="bg-[#111827] rounded-2xl p-6 border border-slate-800 text-center">
+          <div className="bg-white rounded-2xl p-6 border border-slate-200 text-center">
             <p className="text-slate-400 text-xs mb-1">Spent This Month</p>
             <p className="text-red-400 text-2xl font-bold">-${(chartData.expense_total || 0).toLocaleString('en-CA', { minimumFractionDigits: 2 })}</p>
           </div>
@@ -1482,14 +1435,14 @@ const extractChartData = (text: string): { cleanText: string; chart: any | null 
 
         {/* Burn-Down Velocity Chart */}
         {chartData.burndown?.length > 0 ? (
-  <div className="bg-[#111827] rounded-2xl p-6 border border-slate-800">
+  <div className="bg-white rounded-2xl p-6 border border-slate-200">
     <div className="flex justify-between items-start mb-6">
       <div>
-        <h2 className="text-white font-bold text-lg">Spending Velocity</h2>
+        <h2 className="text-slate-900 font-bold text-lg">Spending Velocity</h2>
         <p className="text-slate-500 text-xs">How your balance is moving this month</p>
       </div>
       <div className="text-right">
-        <p className="text-sky-400 text-2xl font-bold">
+        <p className="text-teal-600 text-2xl font-bold">
           ${chartData.burndown[chartData.burndown.length - 1]?.balance.toLocaleString('en-CA', { minimumFractionDigits: 2 })}
         </p>
         <p className="text-slate-500 text-xs">Current balance</p>
@@ -1588,7 +1541,7 @@ const extractChartData = (text: string): { cleanText: string; chart: any | null 
     </ResponsiveContainer>
     <div className="flex items-center justify-center gap-6 mt-4">
       <div className="flex items-center gap-2">
-        <div className="w-6 h-0.5 bg-sky-400 rounded" />
+        <div className="w-6 h-0.5 bg-teal-600 rounded" />
         <span className="text-slate-400 text-xs">Actual</span>
       </div>
       <div className="flex items-center gap-2">
@@ -1598,7 +1551,7 @@ const extractChartData = (text: string): { cleanText: string; chart: any | null 
     </div>
   </div>
 ) : (
-  <div className="bg-[#111827] rounded-2xl p-6 border border-slate-800 text-center">
+  <div className="bg-white rounded-2xl p-6 border border-slate-200 text-center">
     <p className="text-slate-400">Transaction data is still loading from your bank. Try refreshing in a moment.</p>
   </div>
 )}
@@ -1607,27 +1560,11 @@ const extractChartData = (text: string): { cleanText: string; chart: any | null 
         <div className="text-center pb-4">
           <button
             onClick={loadChartData}
-            className="text-sky-400 hover:text-sky-300 text-sm transition"
+            className="text-teal-600 hover:text-sky-300 text-sm transition"
           >
             ↻ Refresh Data
           </button>
-         {/* <button
-  onClick={async () => {
-    const res = await fetch(`${HF_URL}/plaid/debug_data`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${authToken}`
-      },
-      body: JSON.stringify({ message: '', access_token: plaidAccessToken })
-    })
-    const data = await res.json()
-    console.log('DEBUG RAW PLAID DATA:', JSON.stringify(data, null, 2))
-  }}
-  className="text-slate-500 hover:text-white text-xs transition"
->
-  Debug: View Raw Data
-</button> */} 
+ 
         </div>
       </div>
     )}
@@ -1636,7 +1573,308 @@ const extractChartData = (text: string): { cleanText: string; chart: any | null 
   </div>
   
 )} 
+
+      </div>
+
+{/* Floating Dock */}
+      <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40">
+        <div className="flex items-center gap-2 bg-white/90 backdrop-blur-md border border-slate-200 rounded-2xl px-3 py-2 shadow-xl shadow-slate-300/40">
+          
+          {/* History */}
+          <div 
+            className="relative"
+            onMouseEnter={() => setHistoryPopoverOpen(true)}
+            onMouseLeave={() => setHistoryPopoverOpen(false)}
+          >
+            <button
+              className="w-11 h-11 rounded-xl flex items-center justify-center text-xl hover:bg-slate-100 transition"
+              title="Conversations"
+            >
+              <Image src="/History.png" alt="History" width={50} height={50} className="relative z-10 object-contain w-full h-full" priority />
+            </button>
+
+            {/* Popover — anchored above the button */}
+            {historyPopoverOpen && (
+              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 w-96 bg-white border border-slate-200 rounded-2xl shadow-2xl shadow-slate-300/50 flex flex-col max-h-[70vh]">
+                {/* invisible bridge so cursor can travel from button to popover without closing */}
+                <div className="absolute -bottom-3 left-0 right-0 h-3" />
+                
+                <div className="p-3 border-b border-slate-200">
+                  <div className="flex items-center bg-slate-50 rounded-xl px-3 py-2 border border-slate-200">
+                    <span className="text-slate-500 text-xs mr-2">🔍</span>
+                    <input
+                      type="text"
+                      placeholder="Search conversations..."
+                      value={searchQuery}
+                      onChange={e => setSearchQuery(e.target.value)}
+                      className="bg-transparent text-slate-900 placeholder-slate-500 outline-none text-xs flex-1"
+                    />
+                    {searchQuery && (
+                      <button onClick={() => setSearchQuery('')} className="text-slate-500 hover:text-slate-900 text-xs">✕</button>
+                    )}
+                  </div>
+                </div>
+                <div className="flex-1 overflow-y-auto p-2">
+                  {conversations.length === 0 && (
+                    <p className="text-slate-500 text-xs text-center mt-4">No conversations yet</p>
+                  )}
+                  {conversations
+                    .filter(c => c.title.toLowerCase().includes(searchQuery.toLowerCase()))
+                    .map(conv => (
+                      <div
+                        key={conv.id}
+                        onClick={() => { loadConversation(conv); setHistoryPopoverOpen(false) }}
+                        className={`flex items-center justify-between px-3 py-2 rounded-xl cursor-pointer group mb-1 ${
+                          currentConvId === conv.id ? 'bg-teal-600/10 border border-teal-600/20' : 'hover:bg-slate-100'
+                        }`}
+                      >
+                        <span className="text-slate-700 text-xs truncate flex-1">{conv.title}</span>
+                        <button
+                          onClick={(e) => deleteConversation(conv.id, e)}
+                          className="text-slate-400 hover:text-red-500 ml-2 opacity-0 group-hover:opacity-100 transition text-xs shrink-0"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  {searchQuery && conversations.filter(c => c.title.toLowerCase().includes(searchQuery.toLowerCase())).length === 0 && (
+                    <p className="text-slate-500 text-xs text-center mt-4">No results found</p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* New Chat */}
+          <button
+            onClick={() => { newConversation(); setActiveTab('chat') }}
+            className="w-11 h-11 rounded-xl flex items-center justify-center text-xl hover:bg-slate-100 transition"
+            title="New Conversation"
+          >
+            <Image 
+              src="/New-Chat.png" 
+              alt="New Chat" 
+              width={50} 
+              height={50} 
+              className="relative z-10 object-contain w-full h-full" 
+              priority 
+            />
+          </button>
+
+          <div className="w-px h-8 bg-slate-200 mx-1" />
+
+          {/* Chat tab */}
+          <button
+            onClick={() => setActiveTab('chat')}
+            className={`w-11 h-11 rounded-xl flex items-center justify-center text-xl transition ${
+              activeTab === 'chat' ? 'bg-teal-600/10' : 'hover:bg-slate-100'
+            }`}
+            title="Chat"
+          >
+            <Image 
+              src="/Dashboard.png" 
+              alt="Dashboard" 
+              width={50} 
+              height={50} 
+              className="relative z-10 object-contain w-full h-full" 
+              priority 
+            />
+          </button>
+
+          {/* Calendar tab */}
+          <button
+            onClick={async () => {
+              setActiveTab('calendar')
+              if (plaidAccessToken && !calendarData) fetchCalendarData(plaidAccessToken)
+            }}
+            className={`w-11 h-11 rounded-xl flex items-center justify-center text-xl transition ${
+              activeTab === 'calendar' ? 'bg-teal-600/10' : 'hover:bg-slate-100'
+            }`}
+            title="Calendar"
+          >
+            <Image 
+              src="/Calendar.png" 
+              alt="Calendar" 
+              width={50} 
+              height={50} 
+              className="relative z-10 object-contain w-full h-full" 
+              priority 
+            />
+          </button>
+
+          {/* Dashboard tab */}
+          <button
+            onClick={async () => {
+              setActiveTab('dashboard')
+              if (plaidAccessToken && !chartData) loadChartData()
+              if (canadianBanks.length === 0 && authToken) {
+                try {
+                  const res = await fetch(`${HF_URL}/plaid/canadian_banks`, {
+                    headers: { 'Authorization': `Bearer ${authToken}` }
+                  })
+                  const data = await res.json()
+                  if (data.banks) setCanadianBanks(data.banks)
+                } catch (e) { console.error('Banks fetch error:', e) }
+              }
+            }}
+            className={`w-11 h-11 rounded-xl flex items-center justify-center text-xl transition ${
+              activeTab === 'dashboard' ? 'bg-teal-600/10' : 'hover:bg-slate-100'
+            }`}
+            title="Dashboard"
+          >
+            <Image 
+              src="/Insights.png" 
+              alt="Dashboard" 
+              width={50} 
+              height={50} 
+              className="relative z-10 object-contain w-full h-full" 
+              priority 
+            />
+          </button>
+
+          <div className="w-px h-8 bg-slate-200 mx-1" />
+
+          {/* Bank */}
+          <button
+            onClick={() => {
+              if (plaidLinked) {
+                if (confirm('Disconnect your bank?')) {
+                  setPlaidLinked(false)
+                  setPlaidAccessToken('')
+                  setCalendarData(null)
+                  setChartData(null)
+                }
+              } else {
+                setTriggerPlaidLink(true)
+              }
+            }}
+            className="w-11 h-11 rounded-xl flex items-center justify-center text-xl hover:bg-slate-100 transition relative"
+            title={plaidLinked ? 'Bank Connected' : 'Connect Bank'}
+          >
+            <Image 
+              src="/Bank.png" 
+              alt="Bank" 
+              width={50} 
+              height={50} 
+              className="relative z-10 object-contain w-full h-full" 
+              priority 
+            />
+            {plaidLinked && <div className="absolute top-1 right-1 w-2 h-2 bg-emerald-500 rounded-full" />}
+          </button>
+
+          {/* Account */}
+          <div className="relative">
+            <button
+              onClick={() => { setAccountPopoverOpen(!accountPopoverOpen); setHistoryPopoverOpen(false) }}
+              className="w-11 h-11 rounded-xl flex items-center justify-center text-xl hover:bg-slate-100 transition"
+              title="Account"
+            >
+              <Image src="/Account.png" alt="Account" width={50} height={50} className="relative z-10 object-contain w-full h-full" priority />
+            </button>
+
+            {accountPopoverOpen && (
+              <>
+                <div className="fixed inset-0 z-30" onClick={() => setAccountPopoverOpen(false)} />
+                <div className="absolute bottom-full right-0 mb-3 z-40 w-56 bg-white border border-slate-200 rounded-2xl shadow-2xl shadow-slate-300/50 p-2">
+                  {isTrialMode ? (
+                    <button
+                      onClick={() => {
+                        setIsTrialMode(false)
+                        setMessages([])
+                        setHasStarted(false)
+                        setPlaidLinked(false)
+                        setPlaidAccessToken('')
+                        setAccountPopoverOpen(false)
+                      }}
+                      className="w-full text-left px-3 py-2 rounded-xl text-slate-700 hover:bg-slate-100 text-sm transition"
+                    >
+                      ← Back to Sign In
+                    </button>
+                  ) : (
+                    <button
+                      onClick={async () => {
+                        await supabase.auth.signOut()
+                        setIsLoggedIn(false)
+                        setMessages([])
+                        setAuthToken('')
+                        setConversations([])
+                        setPlaidLinked(false)
+                        setPlaidAccessToken('')
+                        setAccountPopoverOpen(false)
+                      }}
+                      className="w-full text-left px-3 py-2 rounded-xl text-slate-700 hover:bg-slate-100 text-sm transition"
+                    >
+                      Sign Out
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Hidden Plaid link button (needed so triggerPlaidLink still works) */}
+      <div className="hidden">
+        <PlaidLinkButton
+          authToken={authToken}
+          plaidLinked={plaidLinked}
+          triggerOpen={triggerPlaidLink}
+          onTriggered={() => setTriggerPlaidLink(false)}
+          isTrialMode={isTrialMode}
+          onSuccess={async (accessToken) => {
+            setPlaidAccessToken(accessToken)
+            setPlaidLinked(true)
+            setCalendarData(null)
+            setChartData(null)
+            if (activeTab === 'calendar') fetchCalendarData(accessToken)
+          }}
+          onDisconnect={() => {
+            setPlaidLinked(false)
+            setPlaidAccessToken('')
+          }}
+        />
+      </div>
+
+
+      {/* Trial mode popup */}
+{trialPopup && (
+  <div className="fixed inset-0 z-50 flex items-center justify-center px-4" onClick={() => setTrialPopup(false)}>
+    <div className="absolute inset-0 bg-black/50" />
+    <div className="relative bg-white border border-slate-200 rounded-2xl p-6 max-w-sm w-full animate-fadeIn" onClick={e => e.stopPropagation()}>
+      <div className="text-center">
+        <span className="text-3xl mb-3 block">🔒</span>
+        <h3 className="text-slate-900 font-bold text-lg mb-2">Bank Connection Unavailable</h3>
+        <p className="text-slate-400 text-sm mb-5">Bank connectivity is not available in trial mode. Create a free account to connect your bank and get personalized insights.</p>
+        <div className="flex flex-col gap-2">
+          <button
+            onClick={() => {
+              setTrialPopup(false)
+              setIsTrialMode(false)
+              setMessages([])
+              setHasStarted(false)
+              setAuthMode('signup')
+            }}
+            className="bg-teal-600 text-[#080E1A] py-3 rounded-xl font-bold hover:bg-sky-300 transition"
+          >
+            Create Free Account
+          </button>
+          <button
+            onClick={() => setTrialPopup(false)}
+            className="text-slate-500 hover:text-slate-300 text-sm transition py-2"
+          >
+            Maybe later
+          </button>
+        </div>
       </div>
     </div>
+  </div>
+)}
+
+    </div>
+
+    
   )
+
+  
 }

@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "FISCAL - Your AI Financial Assistant",
-  description: "AI-powered personal finance assistant for Canadians",
+  title: "Cheque Up",
+  description: "",
   icons: {
     icon: '/favicon.ico',
   },
