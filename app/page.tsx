@@ -7,11 +7,14 @@ import { usePlaidLink } from 'react-plaid-link'
 import ReactMarkdown from 'react-markdown'
 import { motion } from 'framer-motion';
 import dynamic from 'next/dynamic';
+import PrescriptionDashboard from '@/components/PrescriptionDashboard'
+import CashFlowDashboard from '@/components/CashFlowDashboard'
 import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend,
   AreaChart, Area, ReferenceLine
 } from 'recharts'
+import YearSphereDashboard from '@/components/YearSphereDashboard'
 
 
 
@@ -21,8 +24,8 @@ const supabase = createClient(
   'sb_publishable_AZafK1NNF2CmXg4cTmTxhg_-sxIpa-d'
 )
 
-//const HF_URL ='https://mj-prod-fiscal.hf.space' //'http://localhost:8000'
-const HF_URL ='http://localhost:8000'
+const HF_URL ='https://mj-prod-fiscal.hf.space' //'http://localhost:8000'
+//const HF_URL ='http://localhost:8000'
 
 
 interface Message {
@@ -50,7 +53,20 @@ function PlaidLinkButton({ authToken, plaidLinked, onSuccess, onDisconnect, trig
   const [linkToken, setLinkToken] = useState('')
   const linkTokenFetched = useRef(false)
 
+  // Detect if we're returning from an OAuth redirect (RBC, etc.)
+  const isOAuthReturn = typeof window !== 'undefined' && 
+    window.location.href.includes('oauth_state_id')
+
   useEffect(() => {
+    // If we're returning from OAuth, restore the saved link_token
+    if (isOAuthReturn) {
+      const savedToken = sessionStorage.getItem('plaid_link_token')
+      if (savedToken) {
+        setLinkToken(savedToken)
+      }
+      return
+    }
+    
     if (linkTokenFetched.current || plaidLinked) return
     if (!authToken && !isTrialMode) return
     linkTokenFetched.current = true
@@ -68,20 +84,29 @@ function PlaidLinkButton({ authToken, plaidLinked, onSuccess, onDisconnect, trig
         
         const res = await fetch(url, { method: 'POST', headers })
         const data = await res.json()
-        setLinkToken(data.link_token || '')
+        const token = data.link_token || ''
+        
+        // Save the link_token so we can restore it after the OAuth redirect
+        if (token) {
+          sessionStorage.setItem('plaid_link_token', token)
+        }
+        
+        setLinkToken(token)
       } catch (e) {
         console.error('Link token error:', e)
       }
     }
     fetchToken()
-  }, [authToken, plaidLinked, isTrialMode])
+  }, [authToken, plaidLinked, isTrialMode, isOAuthReturn])
 
-
-
-  
   const { open, ready } = usePlaidLink({
     token: linkToken || null,
+    // Tell Plaid Link this is an OAuth return so it picks up where it left off
+    receivedRedirectUri: isOAuthReturn ? window.location.href : undefined,
     onSuccess: async (public_token) => {
+      // Clear the saved token on success
+      sessionStorage.removeItem('plaid_link_token')
+      
       try {
         const url = isTrialMode
           ? `${HF_URL}/trial/plaid/exchange_token`
@@ -106,6 +131,18 @@ function PlaidLinkButton({ authToken, plaidLinked, onSuccess, onDisconnect, trig
       } catch (e) {
         console.error('Exchange token error:', e)
       }
+    },
+    onExit: (err, metadata) => {
+      console.log('Plaid Link exit:', { err, metadata })
+      sessionStorage.removeItem('plaid_link_token')
+      if (err) {
+        alert(
+          "Bank connection didn't complete. If your bank uses 2-step verification, make sure to finish all the verification steps before closing the window. You can also try demo mode."
+        )
+      }
+    },
+    onEvent: (eventName, metadata) => {
+      console.log('Plaid event:', eventName, metadata)
     }
   })
 
@@ -115,6 +152,13 @@ function PlaidLinkButton({ authToken, plaidLinked, onSuccess, onDisconnect, trig
       onTriggered?.()
     }
   }, [triggerOpen, ready, plaidLinked])
+
+  // Auto-open Plaid Link when returning from OAuth
+  useEffect(() => {
+    if (isOAuthReturn && ready && linkToken) {
+      open()
+    }
+  }, [isOAuthReturn, ready, linkToken])
 
   useEffect(() => {
     if (!plaidLinked) {
@@ -287,14 +331,14 @@ export default function Home() {
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin')
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
-  const [activeTab, setActiveTab] = useState<'chat' | 'dashboard' | 'calendar'>('chat')
+  const [activeTab, setActiveTab] = useState<'chat' | 'dashboard' | 'calendar' | 'cashflow'>('chat')
   const [calendarData, setCalendarData] = useState<any>(null)
   const [calendarLoading, setCalendarLoading] = useState(false)
   const [calendarMonth, setCalendarMonth] = useState(new Date())
   const [isTrialMode, setIsTrialMode] = useState(false)
   const [trialPromptsUsed, setTrialPromptsUsed] = useState(0)
   const [trialPopup, setTrialPopup] = useState(false)
-  const TRIAL_LIMIT = 10
+  const TRIAL_LIMIT = 50
 
 useEffect(() => {
   const init = async () => {
@@ -332,7 +376,8 @@ useEffect(() => {
 }, [])
 
 useEffect(() => {
-  if (!plaidAccessToken || !authToken) return
+  if (!plaidAccessToken) return
+  if (!authToken && !isTrialMode) return
   
   if (activeTab === 'calendar' && !calendarData) {
     fetchCalendarData(plaidAccessToken)
@@ -340,6 +385,10 @@ useEffect(() => {
 
   if (activeTab === 'dashboard' && !chartData) {
     loadChartData()
+  }
+
+  if (activeTab === 'dashboard' && !calendarData) {
+    fetchCalendarData(plaidAccessToken)
   }
 }, [plaidAccessToken, activeTab, authToken])
 
@@ -902,6 +951,8 @@ const extractChartData = (text: string): { cleanText: string; chart: any | null 
                 }))
               }
               setIsTrialMode(true)
+              setPlaidLinked(true)
+              setPlaidAccessToken('trial-mock-access-token')
             }}
             className="w-full py-3 rounded-xl font-semibold text-sm text-yellow-500 border border-yellow-400 hover:bg-yellow-50 transition"
           >
@@ -912,8 +963,22 @@ const extractChartData = (text: string): { cleanText: string; chart: any | null 
 
     </div>
 
+      {/* Footer */}
+    <footer className="absolute bottom-0 left-0 right-0 z-10 py-4 px-6">
+      <div className="max-w-5xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-2">
+        <p className="text-xs text-slate-500">
+          © 2026 Fiscal Technologies Inc. All rights reserved.
+        </p>
+        <div className="flex gap-4 text-xs text-slate-500">
+          <a href="/privacy" target="_blank" className="hover:text-teal-600 transition">Privacy</a>
+          <a href="/terms" target="_blank" className="hover:text-teal-600 transition">Terms</a>
+          <a href="mailto:marco.pastore63@gmail.com" className="hover:text-teal-600 transition">Contact</a>
+        </div>
+      </div>
+    </footer>
     
     </div>
+
   )
 }
 
@@ -963,222 +1028,12 @@ const extractChartData = (text: string): { cleanText: string; chart: any | null 
           </div>
         ) : (<p></p>)}
 
-  {activeTab === 'calendar' ? (
-  /* Calendar view — paste the entire calendar JSX here */
-  <div className="flex-1 overflow-y-auto px-4 pt-6 pb-28 max-w-4xl mx-auto w-full min-h-0">
-    {calendarLoading ? (
-  <div className="flex flex-col items-center justify-center h-64 gap-3">
-    <div className="w-8 h-8 border-[3px] border-teal-600 border-t-transparent rounded-full animate-spin" />
-    <div className="text-teal-600 text-sm">Analyzing your transactions...</div>
-    <p className="text-slate-500 text-xs">This can take a minute after connecting your bank</p>
+{activeTab === 'calendar' ? (
+  /* Year Sphere replaces the old calendar */
+  <div className="flex-1 overflow-hidden px-4 pt-6 pb-24 max-w-6xl mx-auto w-full min-h-0">
+    <YearSphereDashboard />
   </div>
-) : !calendarData ? (
-      <div className="flex flex-col items-center justify-center h-64 gap-4">
-        <span className="text-4xl"><Image src="/Calendar.png" alt="Calendar" width={50} height={50} className="relative z-10 object-contain w-30 h-30" priority /></span>
-        <p className="text-slate-400 text-sm">Connect your bank to see your financial calendar</p>
-       <button
-          onClick={() => {
-            /*if (isTrialMode) {
-              setTrialPopup(true)
-              return
-            }*/
-            setTriggerPlaidLink(true)
-          }}
-          className="bg-teal-600 text-[#080E1A] px-6 py-3 rounded-xl font-semibold hover:bg-sky-300 transition"
-        >
-          🔗 Connect Your Bank
-        </button>
-      </div>
-    ) : (
-      <div className="space-y-6">
-        {calendarData && (
-          <div className="bg-white rounded-xl p-3 border border-slate-200 flex items-center justify-between mb-4">
-            <p className="text-slate-400 text-xs">
-              Found {calendarData.recurring_expenses?.length || 0} recurring expenses and {calendarData.recurring_income?.length || 0} income sources
-            </p>
-            <button
-              onClick={() => {
-                setCalendarData(null)
-                fetchCalendarData(plaidAccessToken)
-              }}
-              className="text-teal-600 hover:text-sky-300 text-xs transition"
-            >
-              ↻ Refresh
-            </button>
-          </div>
-        )}
-        {/* Month Navigation */}
-        <div className="flex items-center justify-between">
-          <button
-            onClick={() => setCalendarMonth(prev => new Date(prev.getFullYear(), prev.getMonth() - 1))}
-            className="text-slate-400 hover:text-slate-900 transition px-3 py-1"
-          >
-            ← Prev
-          </button>
-          <h2 className="text-slate-900 font-bold text-lg">
-            {calendarMonth.toLocaleDateString('en-CA', { month: 'long', year: 'numeric' })}
-          </h2>
-          <button
-            onClick={() => setCalendarMonth(prev => new Date(prev.getFullYear(), prev.getMonth() + 1))}
-            className="text-slate-400 hover:text-slate-900 transition px-3 py-1"
-          >
-            Next →
-          </button>
-        </div>
-
-        {/* Calendar Grid */}
-        <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
-          {/* Day headers */}
-          <div className="grid grid-cols-7 border-b border-slate-200">
-            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
-              <div key={d} className="text-center text-slate-500 text-xs py-2 font-semibold">{d}</div>
-            ))}
-          </div>
-
-          {/* Calendar days */}
-          <div className="grid grid-cols-7">
-            {(() => {
-              const year = calendarMonth.getFullYear()
-              const month = calendarMonth.getMonth()
-              const firstDay = new Date(year, month, 1).getDay()
-              const daysInMonth = new Date(year, month + 1, 0).getDate()
-              const today = new Date()
-              const cells = []
-
-              // Empty cells before first day
-              for (let i = 0; i < firstDay; i++) {
-                cells.push(<div key={`empty-${i}`} className="min-h-[80px] border-b border-r border-slate-200/50" />)
-              }
-
-              // Day cells
-              for (let day = 1; day <= daysInMonth; day++) {
-                const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
-                const isToday = today.getFullYear() === year && today.getMonth() === month && today.getDate() === day
-                const events = calendarData.projected_events?.filter((e: any) => e.date === dateStr) || []
-
-                cells.push(
-                  <div key={day} className={`min-h-[80px] border-b border-r border-slate-200/50 p-1 ${isToday ? 'bg-teal-600/5' : ''}`}>
-                    <span className={`text-xs font-semibold block mb-1 ${isToday ? 'text-teal-600' : 'text-slate-400'}`}>
-                      {day}
-                    </span>
-                    {events.map((event: any, idx: number) => (
-                      <div
-                        key={idx}
-                        className={`text-[9px] px-1.5 py-0.5 rounded mb-0.5 truncate ${
-                          event.is_income
-                            ? 'bg-emerald-400/10 text-emerald-400 border border-emerald-400/20'
-                            : 'bg-red-400/10 text-red-400 border border-red-400/20'
-                        }`}
-                        title={`${event.merchant} - $${event.amount} (${event.frequency})`}
-                      >
-                        {event.is_income ? '+' : '-'}${event.amount} {event.merchant.slice(0, 12)}
-                      </div>
-                    ))}
-                  </div>
-                )
-              }
-
-              return cells
-            })()}
-          </div>
-        </div>
-
-        {/* Recurring Summary */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Income */}
-          <div className="bg-white rounded-2xl p-4 border border-slate-200">
-            <h3 className="text-emerald-400 font-bold text-sm mb-3">💰 Recurring Income</h3>
-            {calendarData.recurring_income?.length === 0 ? (
-              <p className="text-slate-500 text-xs">No recurring income detected yet</p>
-            ) : (
-              <div className="space-y-2">
-                {calendarData.recurring_income?.map((item: any, i: number) => (
-                  <div key={i} className="flex items-center justify-between bg-white rounded-xl p-3 border border-slate-200">
-                    <div>
-                      <p className="text-slate-900 text-xs font-semibold">{item.merchant}</p>
-                      <p className="text-slate-500 text-[10px]">{item.frequency} • {item.consecutive_months} months</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-emerald-400 text-sm font-bold">+${item.amount.toFixed(2)}</p>
-                      <span className={`text-[9px] px-1.5 py-0.5 rounded ${
-                        item.status === 'confirmed' ? 'bg-emerald-400/10 text-emerald-400' : 'bg-yellow-400/10 text-yellow-400'
-                      }`}>
-                        {item.status}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Expenses */}
-          <div className="bg-white rounded-2xl p-4 border border-slate-200">
-            <h3 className="text-red-400 font-bold text-sm mb-3">💸 Recurring Expenses</h3>
-            {calendarData.recurring_expenses?.length === 0 ? (
-              <p className="text-slate-500 text-xs">No recurring expenses detected yet</p>
-            ) : (
-              <div className="space-y-2">
-                {calendarData.recurring_expenses?.map((item: any, i: number) => (
-                  <div key={i} className="flex items-center justify-between bg-white rounded-xl p-3 border border-slate-200">
-                    <div>
-                      <p className="text-slate-900 text-xs font-semibold">{item.merchant}</p>
-                      <p className="text-slate-500 text-[10px]">{item.frequency} • {item.consecutive_months} months</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-red-400 text-sm font-bold">-${item.amount.toFixed(2)}</p>
-                      <span className={`text-[9px] px-1.5 py-0.5 rounded ${
-                        item.status === 'confirmed' ? 'bg-emerald-400/10 text-emerald-400' : 'bg-yellow-400/10 text-yellow-400'
-                      }`}>
-                        {item.status}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Export to Google Calendar */}
-        <div className="flex justify-center gap-4 pb-4">
-          <button
-            onClick={async () => {
-              try {
-                const res = await fetch(`${HF_URL}/plaid/calendar_export`, {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${authToken}`
-                  },
-                  body: JSON.stringify({ message: '', access_token: plaidAccessToken })
-                })
-                const blob = await res.blob()
-                const url = URL.createObjectURL(blob)
-                const a = document.createElement('a')
-                a.href = url
-                a.download = 'fiscal-calendar.ics'
-                a.click()
-                URL.revokeObjectURL(url)
-              } catch (e) {
-                console.error('Calendar export error:', e)
-              }
-            }}
-            className="bg-teal-600 text-[#080E1A] px-6 py-3 rounded-xl font-semibold hover:bg-sky-300 transition flex items-center gap-2"
-          >
-            📥 Export to Calendar (.ics)
-          </button>
-          <button
-            onClick={() => fetchCalendarData(plaidAccessToken)}
-            className="text-teal-600 hover:text-sky-300 text-sm transition px-4 py-3"
-          >
-            ↻ Refresh
-          </button>
-        </div>
-      </div>
-    )}
-  </div>
-) : activeTab === 'chat' ? (
+) : activeTab === 'chat' ?  (
   <>
     {/* Messages */}
     <div className="flex-1 overflow-y-auto px-4 py-6 max-w-5xl mx-auto w-full min-h-0">
@@ -1325,254 +1180,32 @@ const extractChartData = (text: string): { cleanText: string; chart: any | null 
   )}
 </div>
   </>
+)  : activeTab === 'cashflow' ? (
+  /* Cash Flow bubbles */
+  <div className="flex-1 overflow-hidden px-4 pt-6 pb-24 max-w-6xl mx-auto w-full min-h-0">
+    <CashFlowDashboard />
+  </div>
 ) : (
-  /* Dashboard */
-  
-<div className="flex-1 overflow-y-auto px-4 pt-6 pb-28 max-w-4xl mx-auto w-full min-h-0">
-   
+  /* Dashboard — prescription pad + diagnostic panel */
+  <div className="flex-1 overflow-hidden px-4 pt-6 pb-4 max-w-6xl mx-auto w-full min-h-0">
     {chartLoading ? (
       <div className="flex items-center justify-center h-full">
         <div className="text-teal-600 animate-pulse text-lg">Loading your financial data...</div>
       </div>
     ) : !chartData ? (
-      
-  <div className="flex flex-col items-center justify-center h-full gap-4">
-    <div className="w-16 h-16 rounded-full bg-white flex items-center justify-center border border-slate-200">
-      <span className="text-3xl">  <Image 
-              src="/Bank.png" 
-              alt="Bank" 
-              width={50} 
-              height={50} 
-              className="relative z-10 object-contain w-full h-full" 
-              priority 
-            /></span>
-    </div>
-    <p className="text-slate-400 text-sm">No bank data available</p>
-    <p className="text-slate-500 text-xs text-center max-w-xs">Connect your bank account in the sidebar to see your spending velocity, balances, and more.</p>
-     {/* Bank Selection Row — always visible */}
-  <div className="mb-6">
-    <p className="text-slate-400 text-xs mb-3">Connect your bank</p>
-    <div className="flex gap-3 overflow-x-auto pb-2">
-      {canadianBanks.map((bank) => (
-        <button
-          key={bank.institution_id}
-          onClick={() => {
-              if (isTrialMode) {
-                setTrialPopup(true)
-                return
-              }
-            setTriggerPlaidLink(true)
-          }}
-          className={`flex flex-col items-center gap-2 p-4 rounded-2xl border transition shrink-0 w-24 ${
-            bankInfo?.name === bank.name
-              ? 'bg-teal-600/10 border-teal-600/30'
-              : 'bg-white border-slate-200 hover:border-slate-600'
-          }`}
-        >
-          {bank.logo ? (
-            <img
-              src={`data:image/png;base64,${bank.logo}`}
-              alt={bank.name}
-              className="w-10 h-10 rounded-lg"
-            />
-          ) : (
-            <div
-              className="w-10 h-10 rounded-lg flex items-center justify-center text-slate-900 font-bold text-sm"
-              style={{ backgroundColor: bank.color || '#38bdf8' }}
-            >
-              {bank.name.charAt(0)}
-            </div>
-          )}
-          <span className="text-slate-300 text-[10px] text-center leading-tight">{bank.name}</span>
-          {bankInfo?.name === bank.name && (
-            <div className="w-2 h-2 rounded-full bg-emerald-400" />
-          )}
-        </button>
-      ))}
-      
-      {/* Other bank button */}
-      <button
-        onClick={() => setTriggerPlaidLink(true)}
-        className="flex flex-col items-center gap-2 p-4 rounded-2xl border bg-white border-slate-200 hover:border-slate-600 transition shrink-0 w-24"
-      >
-        <div className="w-10 h-10 rounded-lg bg-slate-700 flex items-center justify-center text-slate-400 text-xl">
-          +
-        </div>
-        <span className="text-slate-300 text-[10px] text-center leading-tight">Other Bank</span>
-      </button>
-    </div>
-  </div>
-  </div>
-  
+      <div className="flex flex-col items-center justify-center h-full gap-4">
+        <p className="text-slate-400 text-sm">No bank data available</p>
+      </div>
     ) : (
-      <div className="space-y-8">
-
-        {/* Account Balances */}
-        <div className="bg-white rounded-2xl p-6 border border-slate-200">
-          <h2 className="text-slate-900 font-bold text-lg mb-4">Account Balances</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {chartData.accounts?.map((acc: any) => (
-              <div key={acc.name} className="bg-white rounded-xl p-4 border border-slate-200">
-                <p className="text-slate-400 text-xs">{acc.type}</p>
-                <p className="text-slate-900 font-semibold text-sm mt-1">{acc.name}</p>
-                <p className="text-teal-600 text-xl font-bold mt-2">${acc.balance.toLocaleString('en-CA', { minimumFractionDigits: 2 })}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Income vs Expenses Summary */}
-        <div className="grid grid-cols-2 gap-4">
-          <div className="bg-white rounded-2xl p-6 border border-slate-200 text-center">
-            <p className="text-slate-400 text-xs mb-1">Income This Month</p>
-            <p className="text-emerald-400 text-2xl font-bold">+${(chartData.income_total || 0).toLocaleString('en-CA', { minimumFractionDigits: 2 })}</p>
-          </div>
-          <div className="bg-white rounded-2xl p-6 border border-slate-200 text-center">
-            <p className="text-slate-400 text-xs mb-1">Spent This Month</p>
-            <p className="text-red-400 text-2xl font-bold">-${(chartData.expense_total || 0).toLocaleString('en-CA', { minimumFractionDigits: 2 })}</p>
-          </div>
-        </div>
-
-        {/* Burn-Down Velocity Chart */}
-        {chartData.burndown?.length > 0 ? (
-  <div className="bg-white rounded-2xl p-6 border border-slate-200">
-    <div className="flex justify-between items-start mb-6">
-      <div>
-        <h2 className="text-slate-900 font-bold text-lg">Spending Velocity</h2>
-        <p className="text-slate-500 text-xs">How your balance is moving this month</p>
-      </div>
-      <div className="text-right">
-        <p className="text-teal-600 text-2xl font-bold">
-          ${chartData.burndown[chartData.burndown.length - 1]?.balance.toLocaleString('en-CA', { minimumFractionDigits: 2 })}
-        </p>
-        <p className="text-slate-500 text-xs">Current balance</p>
-      </div>
-    </div>
-    <ResponsiveContainer width="100%" height={300}>
-      <AreaChart
-        data={(() => {
-          const data = chartData.burndown;
-          const lastBalance = data[data.length - 1]?.balance || 0;
-          const daysElapsed = data.length;
-          const totalDays = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
-          const daysLeft = totalDays - daysElapsed;
-          const dailyBurnRate = daysElapsed > 1 
-            ? (data[0]?.balance - lastBalance) / (daysElapsed - 1)
-            : 0;
-
-          // Add projected days
-          const projected = [...data.map((d: any) => ({ ...d, projected: null }))];
-          
-          // Set last real day as start of projection
-          if (projected.length > 0) {
-            projected[projected.length - 1].projected = lastBalance;
-          }
-
-          for (let i = 1; i <= daysLeft; i++) {
-            const projDate = new Date(new Date().getFullYear(), new Date().getMonth(), daysElapsed + i);
-            const projBalance = Math.max(0, lastBalance - (dailyBurnRate * i));
-            projected.push({
-              date: projDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-              balance: null,
-              spent: 0,
-              projected: Math.round(projBalance * 100) / 100,
-            });
-          }
-          return projected;
-        })()}
-        margin={{ top: 10, right: 10, left: 10, bottom: 30 }}
-      >
-        <defs>
-          <linearGradient id="balanceGradient" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#38bdf8" stopOpacity={0.3} />
-            <stop offset="100%" stopColor="#38bdf8" stopOpacity={0.02} />
-          </linearGradient>
-          <linearGradient id="projectedGradient" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#f87171" stopOpacity={0.15} />
-            <stop offset="100%" stopColor="#f87171" stopOpacity={0.02} />
-          </linearGradient>
-        </defs>
-        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-        <XAxis
-          dataKey="date"
-          tick={{ fill: '#94a3b8', fontSize: 10 }}
-          angle={-45}
-          textAnchor="end"
-          interval={3}
-        />
-        <YAxis
-          tick={{ fill: '#94a3b8', fontSize: 11 }}
-          tickFormatter={(v) => `$${v.toLocaleString()}`}
-          width={65}
-        />
-        <Tooltip
-          contentStyle={{ backgroundColor: '#0D1B2E', border: '1px solid #1e293b', borderRadius: '12px' }}
-          labelStyle={{ color: '#fff', fontWeight: 'bold' }}
-          formatter={(value: any, name: any) => {
-            if (value === null) return ['-', name]
-            return [`$${Number(value).toFixed(2)}`, name === 'balance' ? 'Balance' : 'Projected']
-          }}
-        />
-        <ReferenceLine y={0} stroke="#475569" strokeDasharray="3 3" />
-        {/* Actual balance */}
-        <Area
-          type="monotone"
-          dataKey="balance"
-          stroke="#38bdf8"
-          strokeWidth={2.5}
-          fill="url(#balanceGradient)"
-          dot={false}
-          activeDot={{ r: 5, fill: '#38bdf8', stroke: '#0D1B2E', strokeWidth: 2 }}
-          connectNulls={false}
-        />
-        {/* Projected trend */}
-        <Area
-          type="monotone"
-          dataKey="projected"
-          stroke="#f87171"
-          strokeWidth={2}
-          strokeDasharray="6 4"
-          fill="url(#projectedGradient)"
-          dot={false}
-          activeDot={{ r: 4, fill: '#f87171', stroke: '#0D1B2E', strokeWidth: 2 }}
-          connectNulls={false}
-        />
-      </AreaChart>
-    </ResponsiveContainer>
-    <div className="flex items-center justify-center gap-6 mt-4">
-      <div className="flex items-center gap-2">
-        <div className="w-6 h-0.5 bg-teal-600 rounded" />
-        <span className="text-slate-400 text-xs">Actual</span>
-      </div>
-      <div className="flex items-center gap-2">
-        <div className="w-6 h-0.5 bg-red-400 rounded" style={{ borderTop: '2px dashed #f87171' }} />
-        <span className="text-slate-400 text-xs">Projected</span>
-      </div>
-    </div>
-  </div>
-) : (
-  <div className="bg-white rounded-2xl p-6 border border-slate-200 text-center">
-    <p className="text-slate-400">Transaction data is still loading from your bank. Try refreshing in a moment.</p>
+      <PrescriptionDashboard 
+        chartData={chartData} 
+        calendarData={calendarData}
+      />
+    )}
   </div>
 )}
+  
 
-        {/* Refresh button */}
-        <div className="text-center pb-4">
-          <button
-            onClick={loadChartData}
-            className="text-teal-600 hover:text-sky-300 text-sm transition"
-          >
-            ↻ Refresh Data
-          </button>
- 
-        </div>
-      </div>
-    )}
-  
-  
-  </div>
-  
-)} 
 
       </div>
 
@@ -1648,17 +1281,10 @@ const extractChartData = (text: string): { cleanText: string; chart: any | null 
           {/* New Chat */}
           <button
             onClick={() => { newConversation(); setActiveTab('chat') }}
-            className="w-11 h-11 rounded-xl flex items-center justify-center text-xl hover:bg-slate-100 transition"
-            title="New Conversation"
-          >
-            <Image 
-              src="/New-Chat.png" 
-              alt="New Chat" 
-              width={50} 
-              height={50} 
-              className="relative z-10 object-contain w-full h-full" 
-              priority 
-            />
+            className="flex flex-col items-center justify-center gap-0.5 px-2 py-1 rounded-xl hover:bg-slate-100 transition">
+              <Image src="/New-Chat.png" alt="New Chat" width={36} height={36} className="object-contain" priority />
+              <span className="text-[9px] font-medium text-slate-600 leading-tight">New</span>
+
           </button>
 
           <div className="w-px h-8 bg-slate-200 mx-1" />
@@ -1666,19 +1292,10 @@ const extractChartData = (text: string): { cleanText: string; chart: any | null 
           {/* Chat tab */}
           <button
             onClick={() => setActiveTab('chat')}
-            className={`w-11 h-11 rounded-xl flex items-center justify-center text-xl transition ${
-              activeTab === 'chat' ? 'bg-teal-600/10' : 'hover:bg-slate-100'
-            }`}
-            title="Chat"
-          >
-            <Image 
-              src="/Dashboard.png" 
-              alt="Dashboard" 
-              width={50} 
-              height={50} 
-              className="relative z-10 object-contain w-full h-full" 
-              priority 
-            />
+            className={`flex flex-col items-center justify-center gap-0.5 px-2 py-1 rounded-xl transition ${activeTab === 'chat' ? 'bg-teal-600/10' : 'hover:bg-slate-100'}`}>
+          <Image src="/Dashboard.png" alt="Chat" width={36} height={36} className="object-contain" priority />
+          <span className="text-[9px] font-medium text-slate-600 leading-tight">Chat</span>
+
           </button>
 
           {/* Calendar tab */}
@@ -1687,19 +1304,10 @@ const extractChartData = (text: string): { cleanText: string; chart: any | null 
               setActiveTab('calendar')
               if (plaidAccessToken && !calendarData) fetchCalendarData(plaidAccessToken)
             }}
-            className={`w-11 h-11 rounded-xl flex items-center justify-center text-xl transition ${
-              activeTab === 'calendar' ? 'bg-teal-600/10' : 'hover:bg-slate-100'
-            }`}
-            title="Calendar"
-          >
-            <Image 
-              src="/Calendar.png" 
-              alt="Calendar" 
-              width={50} 
-              height={50} 
-              className="relative z-10 object-contain w-full h-full" 
-              priority 
-            />
+            className={`flex flex-col items-center justify-center gap-0.5 px-2 py-1 rounded-xl transition ${activeTab === 'calendar' ? 'bg-teal-600/10' : 'hover:bg-slate-100'}`}>
+          <Image src="/Calendar.png" alt="Calendar" width={36} height={36} className="object-contain" priority />
+          <span className="text-[9px] font-medium text-slate-600 leading-tight">Calendar</span>
+
           </button>
 
           {/* Dashboard tab */}
@@ -1717,22 +1325,38 @@ const extractChartData = (text: string): { cleanText: string; chart: any | null 
                 } catch (e) { console.error('Banks fetch error:', e) }
               }
             }}
-            className={`w-11 h-11 rounded-xl flex items-center justify-center text-xl transition ${
-              activeTab === 'dashboard' ? 'bg-teal-600/10' : 'hover:bg-slate-100'
-            }`}
-            title="Dashboard"
+            className={`flex flex-col items-center justify-center gap-0.5 px-2 py-1 rounded-xl transition ${activeTab === 'dashboard' ? 'bg-teal-600/10' : 'hover:bg-slate-100'}`}          
+            title="Insights"
           >
-            <Image 
-              src="/Insights.png" 
-              alt="Dashboard" 
-              width={50} 
-              height={50} 
-              className="relative z-10 object-contain w-full h-full" 
-              priority 
-            />
+            <Image src="/Insights.png" alt="Cash Flow" width={36} height={36} className="object-contain" priority />
+          <span className="text-[9px] font-medium text-slate-600 leading-tight">
+            Insights
+          </span>
           </button>
 
           <div className="w-px h-8 bg-slate-200 mx-1" />
+
+            {/* Cash Flow tab */}
+         <button
+          onClick={() => setActiveTab('cashflow')}
+          className={`flex flex-col items-center justify-center gap-0.5 px-2 py-1 rounded-xl transition ${
+            activeTab === 'cashflow' ? 'bg-teal-600/10' : 'hover:bg-slate-100'
+          }`}
+          title="Cash Flow"
+        >
+          <Image 
+            src="/microIcon.png" 
+            alt="Cash Flow" 
+            width={36} 
+            height={36} 
+            className="relative z-10 object-contain" 
+            priority 
+          />
+          <span className="text-[9px] font-medium text-slate-600 leading-tight">
+            Cash Flow
+          </span>
+        </button>
+          
 
           {/* Bank */}
           <button
@@ -1748,18 +1372,15 @@ const extractChartData = (text: string): { cleanText: string; chart: any | null 
                 setTriggerPlaidLink(true)
               }
             }}
-            className="w-11 h-11 rounded-xl flex items-center justify-center text-xl hover:bg-slate-100 transition relative"
-            title={plaidLinked ? 'Bank Connected' : 'Connect Bank'}
-          >
-            <Image 
-              src="/Bank.png" 
-              alt="Bank" 
-              width={50} 
-              height={50} 
-              className="relative z-10 object-contain w-full h-full" 
-              priority 
-            />
-            {plaidLinked && <div className="absolute top-1 right-1 w-2 h-2 bg-emerald-500 rounded-full" />}
+            className="flex flex-col items-center justify-center gap-0.5 px-2 py-1 rounded-xl hover:bg-slate-100 transition relative">
+           <Image src="/Bank.png" alt="Bank" width={36} height={36} className="object-contain" priority />
+            <span className="text-[9px] font-medium text-slate-600 leading-tight">Bank</span>
+            {plaidLinked && (
+              <span className="absolute top-1 right-1 flex h-2.5 w-2.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+              </span>
+            )}
           </button>
 
           {/* Account */}
